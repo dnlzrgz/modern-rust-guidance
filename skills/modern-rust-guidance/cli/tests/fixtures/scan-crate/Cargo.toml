@@ -1,0 +1,8 @@
+[package]
+name = "scan-crate"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Keeps this fixture out of the repository workspace.
+[workspace]
