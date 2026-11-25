@@ -69,7 +69,7 @@ The same shape works for a `HashMap` per thread merged at the end. Do not spawn 
 
 ## Use atomics for counters and flags
 
-A `Mutex<usize>` or `Mutex<bool>` is an atomic with extra steps. Use `fetch_add` for a counter, with `Ordering::Relaxed` when it only counts and does not publish other data to other threads. If another thread reads data written before the flag, use `Release` on the store and `Acquire` on the load, or use a lock. Many threads incrementing one atomic still contend on its cache line, so for a hot counter keep one per thread and sum them.
+A `Mutex<usize>` or `Mutex<bool>` is an atomic with extra steps. Use `fetch_add` for a counter, with `Ordering::Relaxed` when it only counts and does not publish other data to other threads. If another thread reads data written before the flag, use `Release` on the store and `Acquire` on the load, or use a lock. In existing code, do not weaken an ordering (`SeqCst` to `Relaxed`) or swap a lock for an atomic without a loom or Miri test: the ordering may be what makes a flag or counter a completion signal. Many threads incrementing one atomic still contend on its cache line, so for a hot counter keep one per thread and sum them.
 
 ```rust
 use std::sync::atomic::{AtomicUsize, Ordering};

@@ -99,7 +99,7 @@ mod tests {
 
 - `expected` is a substring match. Pick the stable part of the message. Use `should_panic` only when the panic is the documented contract; return `Result` for errors.
 - `assert!(r.is_ok())` throws away the error: use `r.unwrap()`, `?`, or `assert_eq!(r, Ok(..))`. A `?` failure shows no line number, so with many fallible steps use `.expect("what was being done")`.
-- `assert!(r.is_err())` passes for any error, so a wrong failure still passes. Assert which error: `assert!(matches!(r, Err(ParseError::BadDigit('x'))), "got {r:?}")`, or for `io::Error` and other types with a `kind()`, `assert_eq!(r.unwrap_err().kind(), ErrorKind::NotFound)`. Clippy's `assertions_on_result_states` (under Verify) flags both `is_ok()` and `is_err()` forms.
+- `assert!(r.is_err())` passes for any error, so a wrong failure still passes. Assert which error: `assert!(matches!(r, Err(ParseError::BadDigit('x'))), "got {r:?}")`, or for `io::Error` and other types with a `kind()`, `assert_eq!(r.unwrap_err().kind(), ErrorKind::NotFound)`. If the error type has no `Debug` or `PartialEq`, drop the `{r:?}` message and match on the variant, or derive `Debug` under `#[cfg_attr(test, derive(Debug))]`. Clippy's `assertions_on_result_states` (under Verify) flags both `is_ok()` and `is_err()` forms.
 - Never `#[ignore]` a flaky test to get green: fix it (see `test-isolation`) or delete it. `cargo test -- --ignored` runs only ignored tests, `-- --include-ignored` all.
 
 ## Add context where the value alone is unclear

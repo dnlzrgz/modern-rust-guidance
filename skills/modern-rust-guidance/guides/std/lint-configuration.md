@@ -31,7 +31,7 @@ edition = "2021"        # "2024" needs 1.85
 rust-version = "1.81"   # Clippy reads this as its MSRV; no clippy.toml entry needed
 
 [workspace.lints.rust]
-unsafe_code = "deny" # not "forbid": `forbid` cannot be overridden, so an FFI member crate could not `#[allow]` it
+unsafe_code = "deny" # "deny" when a member crate may need `#[allow]`; `forbid` cannot be overridden, so use it only for a workspace with no FFI crate. Never downgrade an existing `forbid`
 # Custom cfgs (fuzzing, loom, ...) must be declared here, or `unexpected_cfgs` warns on them (1.80).
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)', 'cfg(loom)'] }
 

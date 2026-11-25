@@ -2,13 +2,13 @@
 name: test-organization
 description: Organize unit tests, integration tests in tests/, and a testable binary (lib.rs plus main.rs) in a Cargo package, and run all of them.
 rust-version: "1.70"
-clippy-lints: [items_after_test_module, tests_outside_test_module, redundant_test_prefix]
+clippy-lints: [items_after_test_module, redundant_test_prefix]
 sources:
   - "The Rust Book, ch. 11 Test Organization (MIT/Apache-2.0)"
   - "Cargo Book: Cargo Targets, cargo test (MIT/Apache-2.0)"
   - "Microsoft Pragmatic Rust Guidelines: M-INTEGRATION-TESTS, M-TEST-UTIL (MIT)"
   - "Comprehensive Rust: Unit Tests, Other Types of Tests (CC-BY-4.0 prose, Apache-2.0 code)"
-  - "Clippy lint docs: items_after_test_module, tests_outside_test_module, redundant_test_prefix (MIT/Apache-2.0)"
+  - "Clippy lint docs: items_after_test_module, redundant_test_prefix (MIT/Apache-2.0)"
 ---
 
 # Test Organization
@@ -42,10 +42,10 @@ mod tests {
 ```
 
 ```rust,legacy
-// lint: items_after_test_module, tests_outside_test_module, redundant_test_prefix
+// lint: items_after_test_module, redundant_test_prefix
 pub fn double(x: u32) -> u32 { x * 2 }
 
-#[test] // outside any #[cfg(test)] module
+#[test] // outside any #[cfg(test)] module (tests_outside_test_module)
 fn test_double() { assert_eq!(double(2), 4); }
 
 #[cfg(test)]
@@ -117,11 +117,12 @@ Benches and examples are not `cfg(test)` either, so the same `test-util` feature
 
 ## Avoid
 
-- Tests in the middle of a file, a `test_` prefix, or a `#[test]` outside the module.
+- Tests in the middle of a file, a `test_` prefix, or a `#[test]` outside the `#[cfg(test)]` module in `src/`.
 - `pub` items or `#[cfg(test)]` accessors added only so a test can reach them: write a unit test instead.
 - Logic in `main.rs`, then no tests for it.
 
 ## Verify
 
-- `cargo clippy --workspace --all-targets -- -W clippy::tests_outside_test_module -W clippy::redundant_test_prefix`. Both are restriction lints (opt-in); `items_after_test_module` is on by default. Clippy only sees test code with `--all-targets` or `--tests`. `redundant_test_prefix` needs clippy 1.88+.
+- `cargo clippy --workspace --all-targets -- -W clippy::redundant_test_prefix`. It is opt-in and needs clippy 1.88+; `items_after_test_module` is on by default. Clippy only sees test code with `--all-targets` or `--tests`.
+- `-W clippy::tests_outside_test_module` (restriction) is useful for `src/` only. It also fires on every test in `tests/*.rs`, which is the correct layout, so ignore those hits. That is why `mrg scan` does not enable it.
 - `cargo test` output lists a `Running tests/it/main.rs` section and no empty `common` target.
