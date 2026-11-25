@@ -14,7 +14,7 @@ A lock is slow only when threads wait for it. Threads that share one `Arc<Mutex<
 
 ## Hold a lock only for the access
 
-Never hold a guard across slow work: I/O, sleeping, a big computation, or a call into code you don't control. Never hold a `std::sync` guard across `.await`: it blocks the executor thread and can deadlock. Take what you need, let the guard drop, then work.
+Never hold a guard across slow work: I/O, sleeping, a big computation, or a call into code you don't control. Never hold a `std::sync` guard across `.await`: it blocks the executor thread and can deadlock. Take what you need, let the guard drop (end of scope, a `{ .. }` block, or `drop(guard)`), then work.
 
 ```rust
 use std::sync::Mutex;
@@ -34,8 +34,7 @@ impl Cache {
             return v;
         }
         let value = compute(); // slow work with no lock held
-        // Two threads may both compute (fine if `compute` is idempotent); re-check so
-        // only the first result is stored
+        // Another thread may have stored it meanwhile (fine if `compute` is idempotent)
         let mut entries = self.entries.lock().expect("cache lock poisoned");
         if let Some((_, v)) = entries.iter().find(|(k, _)| *k == key) {
             return v.clone();
@@ -45,8 +44,6 @@ impl Cache {
     }
 }
 ```
-
-A `{ .. }` block or `drop(guard)` ends a guard early.
 
 ## Accumulate per thread, merge once
 
@@ -150,5 +147,4 @@ pub async fn refresh(cache: &Mutex<Vec<u32>>) {
 ## Verify
 
 - `cargo clippy`: `await_holding_lock` is on by default. `mutex_atomic` is restriction, so enable it with `-W clippy::mutex_atomic`. `significant_drop_tightening` (nursery) flags guards that live longer than needed, but it is noisy, so run it by hand.
-- Run the code with 1 thread and with N threads. If it does not get faster with N, look at what holds the lock, with a profiler (see `measure-before-optimizing`).
-- Test the parallel path against the single-threaded result on the same input.
+- Run with 1 thread and with N threads, and check that both give the same result. If N is not faster, profile what holds the lock (see `measure-before-optimizing`).

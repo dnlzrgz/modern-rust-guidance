@@ -23,12 +23,14 @@ use std::fmt::Write as _;
 pub fn describe(items: &[(&str, u32)]) -> String {
     let mut out = String::with_capacity(items.len() * 16);
     for (name, qty) in items {
-        // The Result is Err only if a Display impl fails, where format! would panic too
-        write!(out, "{name}={qty};").expect("Display impl failed");
+        // Writing to a String cannot fail (only a broken Display impl returns Err), so ignore it
+        let _ = write!(out, "{name}={qty};");
     }
     out
 }
 ```
+
+`let _ =` is deliberate: the `fmt::Result` of a `String` target is always `Ok`, and default clippy accepts it. It also avoids `expect` in projects that deny `expect_used`. If a project enables the restriction lint `let_underscore_must_use`, it flags this line: there, use `write!(out, ..).expect("write to String")`, or `push_str` for plain pieces.
 
 ## Build from sequences with `join`, `collect`, and one buffer
 
@@ -40,7 +42,7 @@ use std::fmt::Write as _;
 pub fn hex(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(bytes.len() * 2);
     for b in bytes {
-        write!(s, "{b:02x}").expect("Display impl failed"); // not map(format!).collect::<String>()
+        let _ = write!(s, "{b:02x}"); // not map(format!).collect::<String>()
     }
     s
 }

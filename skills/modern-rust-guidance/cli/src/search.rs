@@ -7,6 +7,9 @@ use std::collections::{HashMap, HashSet};
 const K1: f64 = 1.2;
 const B: f64 = 0.75;
 
+/// Results scoring below this fraction of the top score are dropped (the top hit always stays).
+pub const MIN_RELATIVE_SCORE: f64 = 0.35;
+
 const STOPWORDS: &[&str] = &[
     "a", "an", "and", "are", "as", "at", "be", "by", "do", "for", "from", "how", "i", "in", "is",
     "it", "my", "of", "on", "or", "that", "the", "this", "to", "with",
@@ -97,6 +100,7 @@ pub struct Index {
 pub struct Hit {
     /// Position in the slice passed to [`Index::new`].
     pub index: usize,
+    /// Relative to the best hit, which scores 1.0.
     pub score: f64,
 }
 
@@ -136,7 +140,8 @@ impl Index {
         }
     }
 
-    /// Best matches first; documents matching no query term are omitted.
+    /// Best matches first; documents matching no query term are omitted. Scores are relative
+    /// to the best hit (1.0), and hits below [`MIN_RELATIVE_SCORE`] are dropped.
     pub fn search(&self, query: &str, limit: usize) -> Vec<Hit> {
         let mut seen = HashSet::new();
         let terms: Vec<String> = tokenize(query)
@@ -163,6 +168,12 @@ impl Index {
             })
             .collect();
         hits.sort_by(|a, b| b.score.total_cmp(&a.score).then(a.index.cmp(&b.index)));
+        if let Some(top) = hits.first().map(|h| h.score) {
+            hits.retain(|h| h.score >= top * MIN_RELATIVE_SCORE);
+            for hit in &mut hits {
+                hit.score /= top;
+            }
+        }
         hits.truncate(limit);
         hits
     }
@@ -259,6 +270,39 @@ mod tests {
         let hits = Index::new(&guides).search("allocation", 8);
         assert_eq!(hits.iter().map(|h| h.index).collect::<Vec<_>>(), [1, 0]);
         assert!(hits[0].score > hits[1].score);
+    }
+
+    #[test]
+    fn scores_are_relative_and_weak_hits_are_cut() {
+        let guides = vec![
+            guide(
+                "strong",
+                "Allocation allocation reuse.",
+                "",
+                "# S\n\nallocation\n",
+            ),
+            guide(
+                "weak",
+                "Other topic.",
+                "",
+                &format!("# W\n\nallocation once {}\n", "filler ".repeat(200)),
+            ),
+            guide("middling", "Reuse allocation.", "", "# M\n\nnothing\n"),
+        ];
+        let all = Index::new(&guides).search("allocation", 8);
+        assert!((all[0].score - 1.0).abs() < f64::EPSILON);
+        assert!(all.windows(2).all(|w| w[0].score >= w[1].score));
+        assert!(all.iter().all(|h| h.score >= MIN_RELATIVE_SCORE));
+        assert!(all.iter().all(|h| guides[h.index].id() != "weak"));
+        assert_eq!(all.len(), 2);
+    }
+
+    #[test]
+    fn a_single_weak_match_is_still_returned_at_full_score() {
+        let guides = vec![guide("only", "Something.", "", "# O\n\nallocation\n")];
+        let hits = Index::new(&guides).search("allocation", 8);
+        assert_eq!(hits.len(), 1);
+        assert!((hits[0].score - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]

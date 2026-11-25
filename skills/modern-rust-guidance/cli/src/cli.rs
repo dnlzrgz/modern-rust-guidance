@@ -63,7 +63,7 @@ fn command_help(command: &str) -> Option<&'static str> {
             "Usage: mrg list [--category C] [--json] [--guides-dir D]\n\nOne line per guide: `id  [category, rust ≥ X]  description`. Hubs first.\n"
         }
         "search" => {
-            "Usage: mrg search <query…> [--limit N] [--json] [--guides-dir D]\n\nBM25 search over guide ids, descriptions, headings, lints and bodies. Default limit 8.\n"
+            "Usage: mrg search <query…> [--limit N] [--json] [--guides-dir D]\n\nBM25 search over guide ids, descriptions, headings, lints and bodies. Default limit 8.\nScores are relative to the best hit (1.00); hits below 0.35 are dropped.\n"
         }
         "retrieve" => {
             "Usage: mrg retrieve <id>[,<id>…] [--msrv X.Y] [--guides-dir D]\n\nPrints each guide with an MSRV banner (MSRV from the current project unless --msrv is given).\nThe `## Older MSRV` section is dropped when the MSRV is high enough. Unknown id: exit 2.\n"
@@ -239,9 +239,9 @@ fn search_cmd(parsed: &Parsed) -> Output {
     if hits.is_empty() {
         return Ok("No guides matched. Try other words, or run `mrg list`.\n".to_owned());
     }
-    Ok(lines(
-        hits.iter().map(|hit| catalog::summary(&guides[hit.index])),
-    ))
+    Ok(lines(hits.iter().map(|hit| {
+        catalog::search_line(&guides[hit.index], hit.score)
+    })))
 }
 
 fn retrieve_cmd(parsed: &Parsed) -> Output {
@@ -265,7 +265,7 @@ fn retrieve_cmd(parsed: &Parsed) -> Output {
             .and_then(|cwd| msrv::detect(&cwd))
             .map(|m| m.version),
     };
-    let mut pages = Vec::new();
+    let mut selected: Vec<&Guide> = Vec::new();
     for id in ids {
         let Some(guide) = guides.iter().find(|g| g.id() == id) else {
             let suggestions = search::closest(guides.iter().map(Guide::id), id);
@@ -279,9 +279,9 @@ fn retrieve_cmd(parsed: &Parsed) -> Output {
             );
             return Err(usage(message));
         };
-        pages.push(retrieve::render(guide, project_msrv));
+        selected.push(guide);
     }
-    Ok(pages.join("\n---\n\n"))
+    Ok(retrieve::render_many(&selected, project_msrv))
 }
 
 fn msrv_cmd(parsed: &Parsed) -> Output {

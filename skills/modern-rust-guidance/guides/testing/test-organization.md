@@ -111,6 +111,8 @@ test-util = [] # fakes and inspection hooks; not for production use
 my_crate = { path = ".", features = ["test-util"] }
 ```
 
+Benches and examples are not `cfg(test)` either, so the same `test-util` feature (or a similarly named one) is the legitimate way to give them fixtures and hooks. Dev-dependencies are available to benches and examples too, so the self dev-dependency above enables the feature for them. Don't gate such helpers on `#[cfg(test)]`: the bench would fail to compile.
+
 `[[test]] required-features = ["test-util"]` also works, but a plain `cargo test` then silently skips that target.
 
 ## Avoid

@@ -72,6 +72,30 @@ fn search_ranks_and_limits() {
 }
 
 #[test]
+fn search_shows_relative_scores_and_cuts_weak_hits() {
+    let text = stdout(&mrg(&["search", "reuse", "buffers", "allocation"]));
+    let first = text.lines().next().unwrap();
+    assert!(first.contains("]  1.00  "), "{first}");
+    let mut previous = 1.0_f64;
+    for line in text.lines() {
+        let score: f64 = line.split("  ").nth(2).unwrap().parse().unwrap();
+        assert!((0.35..=previous).contains(&score), "{line}");
+        previous = score;
+    }
+    let json = stdout(&mrg(&[
+        "search",
+        "reuse",
+        "buffers",
+        "allocation",
+        "--json",
+    ]));
+    assert!(
+        json.starts_with("[{\"score\":1,") || json.starts_with("[{\"score\":1.0"),
+        "{json}"
+    );
+}
+
+#[test]
 fn retrieve_applies_msrv_banner() {
     let new = stdout(&mrg(&["retrieve", "early-return", "--msrv", "1.100"]));
     assert!(new.starts_with("<!-- mrg: id=early-return, category=std, rust-version=1.80 -->"));
@@ -91,6 +115,45 @@ fn retrieve_applies_msrv_banner() {
         "1.80",
     ]));
     assert!(both.contains("id=std,") && both.contains("id=allocation-reuse,"));
+}
+
+#[test]
+fn retrieve_many_prints_a_shared_banner_once() {
+    let ok = stdout(&mrg(&[
+        "retrieve",
+        "std,allocation-reuse",
+        "--msrv",
+        "1.80",
+    ]));
+    assert!(
+        ok.starts_with("> Project MSRV 1.80 ≥ 1.70, the highest"),
+        "{ok}"
+    );
+    assert_eq!(ok.matches("Project MSRV").count(), 1);
+    assert!(!ok.contains("## Older MSRV"));
+
+    let mixed = stdout(&mrg(&["retrieve", "std,early-return", "--msrv", "1.75"]));
+    assert!(mixed.starts_with("<!-- mrg: id=std,"), "{mixed}");
+    assert_eq!(mixed.matches("Project MSRV 1.75").count(), 2);
+}
+
+#[test]
+fn retrieve_many_without_msrv_prints_the_banner_once() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("no-msrv-many");
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_mrg"))
+        .args(["retrieve", "std,early-return", "--guides-dir"])
+        .arg(guides())
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let text = stdout(&out);
+    // Only meaningful when no ancestor of the temp dir declares an MSRV.
+    if text.contains("No MSRV declared") {
+        assert!(text.starts_with("> No MSRV declared"), "{text}");
+        assert_eq!(text.matches("No MSRV declared").count(), 1);
+        assert_eq!(text.matches("<!-- mrg:").count(), 2);
+    }
 }
 
 #[test]

@@ -1,6 +1,6 @@
 ---
 name: buffered-io
-description: Speed up file, stdin, stdout, and socket I/O with BufReader, BufWriter, locked stdout, and whole-file reads.
+description: Speed up blocking std::io and std::net file, stdin, stdout, and socket I/O with BufReader, BufWriter, locked stdout, and whole-file reads.
 rust-version: "1.70"
 clippy-lints: [unbuffered_bytes, verbose_file_reads]
 sources:
@@ -11,6 +11,11 @@ sources:
 # Buffered I/O
 
 `File`, `TcpStream`, and similar types are unbuffered: each `read` or `write` call is a system call, and `write!` on a `File` can make several per call. Wrap them in `BufReader` or `BufWriter` when you do many small reads or writes. For one big read or write, use the whole-file helpers instead: `BufWriter` adds nothing to a single large `write_all`.
+
+> [!NOTE]
+> This guide covers blocking `std::io` and `std::net`. Async runtimes (tokio) have their own buffering types and cancellation rules and are out of scope for now. Do not apply `BufReader`/`BufWriter` advice to async code.
+
+If code already batches output in its own buffer (a `Vec<u8>` filled by a formatter, then one `write_all` or vectored write), it is already buffered: do not add a `BufWriter` on top. That copies every byte twice.
 
 ## Wrap writers in `BufWriter` and flush explicitly
 
@@ -121,7 +126,7 @@ pub fn slurp(path: &str) -> io::Result<Vec<u8>> {
 ```
 
 - Writing many small pieces to a `File` or `TcpStream` with `write!` and no `BufWriter`.
-- `BufReader::new(stdin())`, double buffering, or `BufWriter` around a `BufWriter`.
+- `BufReader::new(stdin())`, double buffering, or `BufWriter` around a `BufWriter` or around a writer that is fed by your own batch buffer.
 
 ## Verify
 

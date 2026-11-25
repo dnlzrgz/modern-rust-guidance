@@ -67,6 +67,8 @@ pub fn fold(hash: u64) -> u32 {
 }
 ```
 
+List only lints that actually fire in that scope. Each unmet name in an `#[expect]` list triggers its own `unfulfilled_lint_expectations`, so do not convert `#![allow(a, b, c)]` to `#![expect(a, b, c)]` mechanically: run clippy, keep the lints that fire, and drop or split off the rest.
+
 Use `#[allow(lint, reason = "…")]` only when the lint fires in some configurations and not others (`cfg`, features, platform-specific code), because `#[expect]` would warn where it stays quiet. The `allow_attributes` lint (restriction group, 1.81+) flags every outer `#[allow]`, including inside `cfg_attr`, but ignores `#![allow]` and macro output. `allow_attributes_without_reason` (restriction) also covers `#[expect]`, so it is not redundant with `allow_attributes`: enable both, and exempt the rare legitimate `allow` explicitly.
 
 ## Configure Clippy itself
@@ -79,6 +81,19 @@ msrv = "1.81"
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 ```
+
+`allow-*-in-tests` covers only `#[cfg(test)]` code and `#[test]` functions. Benches and examples are separate crates that are not built with `cfg(test)`, so `cargo clippy --all-targets` still lints their `unwrap`, `expect`, and `panic`. Put a crate-level attribute at the top of the bench or example file (`allow_attributes` ignores inner attributes):
+
+```rust
+#![allow(clippy::unwrap_used, clippy::expect_used, reason = "bench setup may panic")]
+
+pub fn main() {
+    let n = std::env::args().next().expect("argv[0]");
+    println!("{n}");
+}
+```
+
+Use `allow` here when you can't tell which of the lints fire. If you use `#![expect(..)]`, name only the lints that fire in that file.
 
 ## Avoid
 
@@ -108,6 +123,6 @@ pub fn sum(v: &[u32]) -> u32 {
 ## Verify
 
 - `cargo clippy --all-targets --all-features -- -D warnings` passes, and `rg "allow\("` in `src/` shows only entries with a `reason`.
-- `unfulfilled_lint_expectations` is a warning. A new one means a suppression can be deleted.
+- `unfulfilled_lint_expectations` is a warning. A new one means a suppression, or one name in an `expect` list, can be deleted. Run with `--all-targets`: benches and examples are not covered by the `in-tests` options.
 - After moving lints into `[workspace.lints]`, run `cargo clippy` in one member to confirm it picks them up.
 - `allow_attributes` and `allow_attributes_without_reason` are restriction lints: they are off unless you enable them in `[lints.clippy]` as above.

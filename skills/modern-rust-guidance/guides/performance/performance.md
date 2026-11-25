@@ -38,6 +38,10 @@ Rust is fast by default once you build with `--release`. Most remaining wins com
 | `type-size-and-layout` | Many values of one type, large enum variants, large `Result` errors, large arrays, big futures, or by-value moves of big structs. |
 | `shared-state-contention` | Threads share an `Arc<Mutex<_>>` or `RwLock`, a guard is held across slow work or `.await`, or a shared counter is hot: short critical sections, per-thread accumulation, atomics. |
 
+## Reviewing already-tuned code
+
+If the project has a tuned `[profile.release]`, benches, or a commit history of performance work, someone has measured already. Read the profile settings, the benches, and `git log` for the performance commits before suggesting anything, and assume the obvious fixes were tried. Do not report a performance finding without a measurement (command, input, before/after numbers); a code-reading hunch is a question to the owner, not a finding. Correctness and testing gaps are often the more useful result.
+
 ## Threads and async
 
 Std-only parallelism is `thread::scope` (threads borrow local data and are joined before it returns) sized by `thread::available_parallelism()`. Use it for CPU-bound work that splits into independent chunks, and see `shared-state-contention` for the sharing rules. Do not spawn threads for tiny inputs, where start-up costs more than the work. Async is for waiting on many I/O operations, not for speeding up computation. An `async fn` with no `.await` is a smell that `unused_async` (pedantic) reports.

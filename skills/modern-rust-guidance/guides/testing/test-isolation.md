@@ -93,8 +93,34 @@ Do not assert that something took less than N milliseconds. Inject the clock ins
 
 A `static` counter, cache, or `OnceLock` in the code under test is shared by every test in the binary, in any order. Prefer an instance each test creates. If a true global must be exercised, give it its own `tests/<name>.rs`: a separate binary is a separate process (see `test-organization`). Seed any randomness with a fixed value and print it on failure (see `meaningful-tests`).
 
+If the global cannot be instanced (a process-wide metrics counter, say) and you only need to see that the code touched it, read it before and after and assert a lower bound. Never `assert_eq!(counter, 1)` on the absolute value, or on `after - before == 1`: another test running in parallel on a different thread may bump the same counter between your two reads, so `==` passes or fails by scheduling. A lower bound holds however the other tests interleave.
+
+```rust
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static REQUESTS: AtomicU64 = AtomicU64::new(0);
+
+pub fn handle() {
+    REQUESTS.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn requests() -> u64 {
+    REQUESTS.load(Ordering::Relaxed)
+}
+
+#[test]
+fn handle_counts_a_request() {
+    let before = requests();
+    handle();
+    assert!(requests() > before, "counter did not move"); // not `== before + 1`: other tests share it
+}
+```
+
+This proves the counter moved, not that it moved exactly once. For an exact count, use an instance or a separate `tests/<name>.rs` binary where this is the only test.
+
 ## Avoid
 
+- Exact `==` assertions on a shared global counter (use a before/after lower bound or an instance).
 - `#[serial]`-style locks, and `-- --test-threads=1` as a fix: it is a diagnostic that confirms shared state, not a remedy.
 - Fixed names such as `/tmp/test.db`, fixed ports, and cleanup code at the end of the test body.
 - `set_var`, `remove_var`, and `set_current_dir` in tests, tests that rely on a particular order, and `thread::sleep` as synchronization.

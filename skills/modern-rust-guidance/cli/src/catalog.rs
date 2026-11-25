@@ -44,6 +44,17 @@ pub fn summary(guide: &Guide) -> String {
     )
 }
 
+/// `id  [category, rust ≥ X]  score  description`, with the score relative to the best hit.
+pub fn search_line(guide: &Guide, score: f64) -> String {
+    format!(
+        "{}  [{}, rust ≥ {}]  {score:.2}  {}",
+        guide.id(),
+        guide.category,
+        guide.version,
+        guide.front.description
+    )
+}
+
 pub fn to_json(guide: &Guide) -> Value {
     Value::object([
         ("id", Value::string(guide.id())),

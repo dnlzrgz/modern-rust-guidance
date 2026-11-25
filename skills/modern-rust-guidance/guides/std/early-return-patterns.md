@@ -47,6 +47,24 @@ pub fn total(lines: &[&str]) -> Result<u32, String> {
 
 Notes: the initializer cannot end in `}` (an `if`/`match` directly before `else` is rejected; wrap it in parentheses or bind it first), and the `else` block cannot see the pattern's bindings. `let Ok(x) = res else { return … }` throws the `Err` away, so use it only when the error is irrelevant.
 
+## Prefer `ok_or(..)?` when the `else` only returns an error
+
+If the failure branch just returns a constant or cheap error, `opt.ok_or(err)?` is shorter than `let … else { return Err(err) }` or a `match`. Clippy's `manual_let_else` fires on the `match` shape and suggests `let … else`, but for an error return `ok_or` is the better rewrite. Use `ok_or_else(|| ..)?` when the error allocates or formats (see `option-result-combinators`). Keep `let … else` for `continue`, `break`, or a non-error `return`.
+
+```rust
+#[derive(Debug)]
+pub enum LookupError {
+    NoHost,
+    NoPort(String),
+}
+
+pub fn ends(parts: &[&str]) -> Result<usize, LookupError> {
+    let host = parts.first().ok_or(LookupError::NoHost)?; // constant error
+    let port = parts.get(1).ok_or_else(|| LookupError::NoPort(host.to_string()))?; // built lazily
+    Ok(host.len() + port.len())
+}
+```
+
 ## Chain conditions with let chains (1.88, edition 2024 only)
 
 In edition 2024, `if` and `while` accept `&&` chains that mix `let` patterns and booleans. This replaces nested `if let { if cond { … } }`. It does not compile in edition 2021 or earlier. `||` is not allowed, and `let` must be at the top level of the chain. `matches!(v, Pat if guard)` is a plain `bool`, so it also composes inside a chain.
