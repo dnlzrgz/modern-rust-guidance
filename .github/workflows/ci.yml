@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+  # Weekly run on the latest stable, so a clippy release that renames or
+  # changes a lint used by a guide shows up even without new commits.
+  schedule:
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Lint, test and validate guides
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Formatting
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Tests
+        run: cargo test --locked
+
+      - name: Guides (compile snippets and check lint markers)
+        run: cargo run --quiet --locked -- check --compile --clippy
+
+      - name: index.md is up to date
+        run: |
+          cargo run --quiet --locked -- index > /tmp/index.md
+          diff -u skills/modern-rust-guidance/index.md /tmp/index.md
+
+  msrv:
+    name: Build on MSRV (1.85)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@1.85
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check
+        run: cargo check --all-targets --locked
