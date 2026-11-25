@@ -102,7 +102,11 @@ pub fn run(args: &[String]) -> Output {
         },
         "list" => list(&Parsed::new(rest, &["json"], &["category", "guides-dir"])?),
         "search" => search_cmd(&Parsed::new(rest, &["json"], &["limit", "guides-dir"])?),
-        "retrieve" => retrieve_cmd(&Parsed::new(rest, &[], &["msrv", "manifest-path", "guides-dir"])?),
+        "retrieve" => retrieve_cmd(&Parsed::new(
+            rest,
+            &[],
+            &["msrv", "manifest-path", "guides-dir"],
+        )?),
         "msrv" => msrv_cmd(&Parsed::new(rest, &[], &["manifest-path"])?),
         "scan" => scan_cmd(&Parsed::new(
             rest,
@@ -253,7 +257,9 @@ fn retrieve_cmd(parsed: &Parsed) -> Output {
         .filter(|id| !id.is_empty())
         .collect();
     if ids.is_empty() {
-        return Err(usage("usage: mrg retrieve <id>[,<id>…] [--msrv X.Y | --manifest-path P]"));
+        return Err(usage(
+            "usage: mrg retrieve <id>[,<id>…] [--msrv X.Y | --manifest-path P]",
+        ));
     }
     let (guides, _) = load_guides(parsed, false)?;
     let project_msrv = match parsed.value("msrv") {
