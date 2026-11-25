@@ -6,21 +6,29 @@ clippy-lints: []
 sources:
   - "Rust Performance Book: Benchmarking, Profiling, Build Configuration (MIT/Apache-2.0)"
   - "Microsoft Pragmatic Rust Guidelines: M-HOTPATH (MIT)"
-  - "Cargo Book: Profiles (MIT/Apache-2.0)"
+  - "Cargo Book: Profiles, Environment Variables (MIT/Apache-2.0)"
   - "std docs: std::hint::black_box (MIT/Apache-2.0)"
 ---
 
 # Measure Before Optimizing
 
-Do not guess where time goes. Build in release mode, find the hot spot with a profiler, change one thing, and measure again. An optimization with no before/after measurement is not done. For the order of attack, see `performance`.
+Do not guess where time goes. Build in release mode, find the hot spot with a profiler, change one thing at a time, and measure again. An optimization with no before/after measurement, reported as the command, the input, and the numbers, is not done. For the order of attack, see `performance`.
 
 ## Always measure a release build
 
 `cargo run` and `cargo build` use the unoptimized `dev` profile. `cargo build --release` and `cargo run --release` use `release`, and `cargo bench` uses `bench`, which inherits `release`. A timing taken from a dev build says nothing about production. `cargo test` uses the `test` profile, which inherits `dev`, so run timing tests with `cargo test --release`.
 
+Release also turns off `debug-assertions` and `overflow-checks`. Code that panics on overflow in `dev` wraps silently in `release`, and `debug_assert!` code disappears, so a release timing may be of different behavior.
+
 ## Profile first
 
-Profile a release-grade build that keeps line tables, using a custom profile so the real `release` profile stays unchanged:
+Profile a release-grade build that keeps line tables. To leave `Cargo.toml` alone, override the release profile from the environment:
+
+```sh
+CARGO_PROFILE_RELEASE_DEBUG=line-tables-only cargo build --release
+```
+
+To keep a separate artifact, add a custom profile so the real `release` profile stays unchanged:
 
 ```toml
 [profile.profiling]
@@ -30,8 +38,7 @@ debug = "line-tables-only"      # lets profilers show source lines
 
 Build it with `cargo build --profile profiling`. The binary lands in `target/profiling/`. Then use an external tool on the user's machine: `perf` (Linux), `samply`, or Instruments (macOS) for where CPU time goes; Cachegrind or Callgrind for per-line instruction counts; DHAT or heaptrack for allocation sites. If stacks look broken, rebuild with `RUSTFLAGS="-C force-frame-pointers=yes"`. Do not install profilers on your own. If none is available, say so and fall back to the micro-benchmark below.
 
-> [!NOTE]
-> Prebuilt `std` has no debug info, so std frames show up without source lines.
+To compare two whole-program runs, `hyperfine` (an external tool, not a crate) repeats a command with warm-up runs and reports the mean and spread. Ask before installing it.
 
 ## Micro-benchmark with std only
 
@@ -62,7 +69,7 @@ fn sum_squares(data: &[u64]) -> u64 {
 }
 
 #[test]
-#[ignore = "benchmark: cargo test --release -- --ignored --nocapture"]
+#[ignore = "benchmark: cargo test --release -- --ignored --nocapture --test-threads=1"]
 fn bench_sum_squares() {
     let data: Vec<u64> = (0..100_000).collect();
     // black_box the input too, or the compiler may fold the whole call away
@@ -71,6 +78,7 @@ fn bench_sum_squares() {
 }
 ```
 
+- Run timing tests with `--test-threads=1`. Tests run in parallel by default and compete for the CPU, which distorts every one of them.
 - `black_box` is best-effort, not a guarantee. Treat a suspiciously fast result as a broken benchmark.
 - Use realistic input sizes and shapes. A tiny input measures the harness, not the code.
 - Wall time is noisy. Run several times, and when differences are small compare instruction counts (Cachegrind) instead.
@@ -78,13 +86,6 @@ fn bench_sum_squares() {
 
 > [!NOTE]
 > `criterion` and `divan` are the usual benchmark crates (they need `harness = false` under `[[bench]]`). They are out of scope for this guide, so ask before adding a dev-dependency.
-
-## Avoid
-
-- Timing a dev build, or timing once.
-- "Optimizing" code no profile points at. Algorithm and data-structure changes usually beat micro-tweaks.
-- Changing several things at once, so nobody knows which one helped.
-- Quoting a speedup you did not measure. Report the command, the input, and before/after numbers.
 
 ## Older MSRV
 

@@ -12,6 +12,7 @@ mod frontmatter;
 mod guide;
 mod json;
 mod msrv;
+mod prose;
 mod retrieve;
 mod scan;
 mod search;

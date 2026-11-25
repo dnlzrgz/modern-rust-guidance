@@ -2,11 +2,11 @@
 name: option-result-combinators
 description: Test, convert, and default Option and Result values with the current combinators instead of map_or(false, …), match, or eager unwrap_or calls.
 rust-version: "1.82"
-clippy-lints: [unnecessary_map_or, manual_is_variant_and, manual_inspect, option_map_or_none, manual_ok_or, unnecessary_lazy_evaluations, or_fun_call, unwrap_or_default]
+clippy-lints: [unnecessary_map_or, manual_is_variant_and, manual_inspect, option_map_or_none, manual_ok_or, unnecessary_lazy_evaluations, unwrap_or_default]
 sources:
   - "std docs: std::option::Option, std::result::Result (MIT/Apache-2.0)"
   - "Rust release notes 1.70, 1.75, 1.76, 1.80, 1.82 (MIT/Apache-2.0)"
-  - "Clippy lint docs: unnecessary_map_or, manual_is_variant_and, manual_inspect, or_fun_call (MIT/Apache-2.0)"
+  - "Clippy lint docs: unnecessary_map_or, manual_is_variant_and, manual_inspect, or_fun_call, ref_option (MIT/Apache-2.0)"
 ---
 
 # Option and Result Combinators
@@ -15,7 +15,7 @@ Models still write `map_or(false, …)`, `map(|x| { log(&x); x })`, and `unwrap_
 
 ## Test the contents with `is_some_and`, `is_ok_and`, `is_none_or`
 
-`is_some_and`, `is_ok_and`, `is_err_and` are stable since 1.70, and `Option::is_none_or` since 1.82. They take `self` by value, so on an owned `Option<String>` call `as_ref()` or `as_deref()` first or you move the value.
+`is_some_and`, `is_ok_and`, `is_err_and` are stable since 1.70, and `Option::is_none_or` since 1.82. They take `self` by value, so on an owned `Option<String>` call `as_ref()` or `as_deref()` first, or you move the value.
 
 ```rust
 pub fn is_admin(role: Option<&str>) -> bool {
@@ -27,9 +27,10 @@ pub fn within_limit(limit: Option<u32>, n: u32) -> bool {
     limit.is_none_or(|max| n <= max)
 }
 
-pub fn has_prefix(name: &Option<String>) -> bool {
-    // as_deref borrows; `name.is_some_and(..)` would move the String out.
-    name.as_deref().is_some_and(|s| s.starts_with("tmp_"))
+// Take `Option<&str>`, not `&Option<String>`. From an owned `Option<String>` call
+// `has_prefix(owned.as_deref())`; `owned.is_some_and(..)` would move the String out.
+pub fn has_prefix(name: Option<&str>) -> bool {
+    name.is_some_and(|s| s.starts_with("tmp_"))
 }
 
 pub fn parsed_ok_and_positive(s: &str) -> bool {
@@ -68,6 +69,16 @@ pub fn words(text: Option<String>) -> String {
 }
 ```
 
+## Turn a `bool` into an `Option`
+
+`ok.then_some(v)` evaluates `v` eagerly, so use it for a value that is already computed or cheap. `ok.then(|| v)` runs the closure only when the bool is `true`: use it when building `v` does work.
+
+```rust
+pub fn first_word(on: bool, s: &str) -> Option<String> {
+    on.then(|| s.split(' ').next().unwrap_or("").to_owned()) // allocates only when `on`
+}
+```
+
 ## Reshape instead of matching
 
 ```rust
@@ -83,17 +94,9 @@ pub fn port(raw: Option<&str>) -> Result<Option<u16>, ParseIntError> {
 pub fn expire(slot: &mut Option<u64>, now: u64) -> Option<u64> {
     slot.take_if(|created| now - *created > 60)
 }
-
-// Option::as_slice (1.75): zero-or-one element slice, no allocation.
-pub fn run(args: &[&str]) -> usize {
-    args.len()
-}
-pub fn run_optional(extra: Option<&str>) -> usize {
-    run(extra.as_slice())
-}
 ```
 
-`Option::get_or_insert_default` is 1.83, `Result::flatten` is 1.89. Both are fine when the MSRV allows.
+`Option::as_slice` (1.75) turns an `Option<T>` into a zero-or-one element `&[T]` without allocating, which is handy for passing an optional argument to a slice-taking function. `Option::get_or_insert_default` (needs 1.83) and `Result::flatten` (needs 1.89) are fine when the MSRV allows.
 
 ## Avoid
 
@@ -111,7 +114,7 @@ pub fn c(o: Option<u32>) -> bool {
 ```
 
 ```rust,legacy
-// lint: manual_inspect, manual_ok_or, or_fun_call, unnecessary_lazy_evaluations
+// lint: manual_inspect, manual_ok_or, unnecessary_lazy_evaluations
 pub fn d(o: Option<u32>) -> Option<u32> {
     o.map(|n| {
         println!("{n}");
@@ -137,10 +140,9 @@ Also avoid `.ok()` to silence an error you should report, `.unwrap_or_default()`
 - **Below 1.80:** replace `take_if` with `if slot.as_mut().is_some_and(pred) { slot.take() } else { None }`.
 - **Below 1.76:** no `inspect`/`inspect_err`; use `map`/`map_err` with a closure that returns its argument.
 - **Below 1.75:** no `Option::as_slice`; use `std::slice::from_ref` inside a `match`.
-- `is_some_and` and friends need 1.70, which is the floor for this skill.
 
 ## Verify
 
-- `cargo clippy -- -W clippy::unnecessary_map_or -W clippy::manual_is_variant_and -W clippy::manual_inspect -W clippy::option_map_or_none -W clippy::manual_ok_or -W clippy::unnecessary_lazy_evaluations -W clippy::or_fun_call -W clippy::unwrap_or_default`.
-- `or_fun_call` is in the `nursery` group and can be noisy. Treat each hit as a question: does the argument allocate or do real work?
+- `cargo clippy` flags most of these by default. `manual_is_variant_and` is pedantic: run it with `-W clippy::manual_is_variant_and`.
+- Hand-run audits: `-W clippy::or_fun_call` (nursery, noisy: treat each hit as a question, does the argument allocate or do real work?) and `-W clippy::ref_option` (pedantic, flags `&Option<T>` parameters).
 - After switching to `is_some_and` on an owned value, check for "use of moved value" errors and add `as_ref()` / `as_deref()`.

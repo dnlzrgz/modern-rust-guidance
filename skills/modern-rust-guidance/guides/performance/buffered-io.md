@@ -1,6 +1,6 @@
 ---
 name: buffered-io
-description: Speed up file, stdin, stdout, and socket I/O with BufReader, BufWriter, locked stdout, and reused line buffers.
+description: Speed up file, stdin, stdout, and socket I/O with BufReader, BufWriter, locked stdout, and whole-file reads.
 rust-version: "1.70"
 clippy-lints: [unbuffered_bytes, verbose_file_reads]
 sources:
@@ -10,7 +10,7 @@ sources:
 
 # Buffered I/O
 
-`File`, `TcpStream`, and similar types are unbuffered: each `read` or `write` call is a system call, and `write!` on a `File` can make several per call. Wrap them in `BufReader` or `BufWriter` when you do many small reads or writes. For one big read or write, use the whole-file helpers instead.
+`File`, `TcpStream`, and similar types are unbuffered: each `read` or `write` call is a system call, and `write!` on a `File` can make several per call. Wrap them in `BufReader` or `BufWriter` when you do many small reads or writes. For one big read or write, use the whole-file helpers instead: `BufWriter` adds nothing to a single large `write_all`.
 
 ## Wrap writers in `BufWriter` and flush explicitly
 
@@ -55,26 +55,28 @@ pub fn print_all(items: &[u32]) -> io::Result<()> {
 
 Flush before blocking on input if the output is an interactive prompt. `stdin().lock()` and `stderr().lock()` work the same way for repeated reads and writes.
 
-## Read lines without allocating per line
+`BufWriter::new` and `BufReader::new` use an 8 KiB buffer. For large outputs, `BufWriter::with_capacity(64 * 1024, out)` means fewer system calls. Measure the size with `strace -c` or a profiler rather than guessing.
 
-`BufRead::lines()` allocates a new `String` per line. Use one `String` and `read_line`, which appends, so `clear()` it each time. `Stdin` is buffered internally, so use `io::stdin().lock()` there and do not wrap it in a `BufReader`.
+## Read lines with `lines()`, and reuse a `String` only when profiled
+
+`BufRead::lines()` is fine by default: it strips line endings and is simple. It allocates one `String` per line, so switch only when a profile shows that cost. `Stdin` is buffered internally, so use `io::stdin().lock()` and do not wrap it in a `BufReader`. Files and sockets need `BufReader`.
 
 ```rust
 use std::io::{self, BufRead, BufReader, Read};
 
 pub fn longest_line(input: impl Read) -> io::Result<usize> {
-    let mut reader = BufReader::new(input); // files and sockets need this
+    let mut reader = BufReader::new(input);
     let mut line = String::new();
     let mut longest = 0;
     while reader.read_line(&mut line)? != 0 {
-        longest = longest.max(line.trim_end().len());
+        longest = longest.max(line.trim_end().len()); // read_line keeps the line ending
         line.clear(); // read_line appends; forgetting this grows `line` forever
     }
     Ok(longest)
 }
 ```
 
-This works only if the loop body can use a `&str`. If not, `lines()` is fine. To avoid UTF-8 validation, read bytes: `read_until(b'\n', &mut buf)` into a reused `Vec<u8>`, and `BufRead::skip_until` (1.83) to discard a record unread.
+This works only if the loop body can use a `&str`. If you need an owned `String` per line, `lines()` is the right tool. To skip UTF-8 validation, `read_until(b'\n', &mut buf)` fills a reused `Vec<u8>`.
 
 ## Read or copy a whole stream in one call
 
@@ -92,7 +94,7 @@ pub fn dump(mut from: impl io::Read, mut to: impl io::Write) -> io::Result<u64> 
 }
 ```
 
-`io::read_to_string(reader)` (1.65) does the same for any `Read`. On Linux, `io::copy` uses `copy_file_range`, `sendfile`, or `splice` where it can.
+`io::read_to_string(reader)` (1.65) does the same for any `Read`.
 
 ## Avoid
 
@@ -120,7 +122,6 @@ pub fn slurp(path: &str) -> io::Result<Vec<u8>> {
 
 - Writing many small pieces to a `File` or `TcpStream` with `write!` and no `BufWriter`.
 - `BufReader::new(stdin())`, double buffering, or `BufWriter` around a `BufWriter`.
-- `for line in reader.lines()` in a hot loop where a `&str` per line is enough.
 
 ## Verify
 

@@ -5,7 +5,7 @@ rust-version: "1.87"
 clippy-lints: [manual_retain, manual_pop_if, map_entry, manual_contains, stable_sort_primitive]
 sources:
   - "std docs: Vec, slice, HashMap, BTreeMap, VecDeque (MIT/Apache-2.0)"
-  - "Rust release notes 1.61, 1.66, 1.86, 1.87, 1.88, 1.91, 1.93 (MIT/Apache-2.0)"
+  - "Rust release notes 1.77, 1.82, 1.86, 1.87, 1.88, 1.91, 1.93 (MIT/Apache-2.0)"
   - "Clippy lint docs: manual_retain, manual_pop_if, map_entry, manual_contains, stable_sort_primitive (MIT/Apache-2.0)"
 ---
 
@@ -15,13 +15,13 @@ Edit collections where they live. Models still rebuild a `Vec` with `into_iter()
 
 ## Filter and remove in place
 
-`retain` (and `retain_mut` since 1.61, when the closure mutates) keeps matches. When you need the removed items, `extract_if` moves them out without cloning. The closure may mutate the element (`&mut T`; maps get `(&K, &mut V)`).
+Reach for `retain` (`retain_mut` when the closure mutates) first. Use `extract_if` only when you need the removed items: it moves them out without cloning. The closure may mutate the element (`&mut T`; maps get `(&K, &mut V)`; sets get `&T`).
 
 | Type | `extract_if` | Since |
 | --- | --- | --- |
 | `Vec` | `extract_if(range, pred)` | 1.87 |
-| `HashMap`, `HashSet` | `extract_if(pred)` | 1.88 |
-| `BTreeMap`, `BTreeSet` | `extract_if(range, pred)` | 1.91 |
+| `HashMap`, `HashSet` | `extract_if(pred)` | needs 1.88 |
+| `BTreeMap`, `BTreeSet` | `extract_if(range, pred)` | needs 1.91 |
 
 If the returned iterator is dropped early, the remaining elements stay in the collection. Always consume it (`collect()` or `for_each(drop)`).
 
@@ -38,13 +38,11 @@ pub fn drop_odd(v: &mut Vec<u32>) {
 pub fn take_failed(jobs: &mut Vec<Job>) -> Vec<Job> {
     jobs.extract_if(.., |j| j.failed).collect() // `..` = whole vector
 }
-
-pub fn pop_big(stack: &mut Vec<u32>) -> Option<u32> {
-    stack.pop_if(|top| *top > 100) // Vec::pop_if (1.86)
-}
 ```
 
-`VecDeque::pop_front_if` and `pop_back_if` are 1.93. `BinaryHeap::pop_if` is nightly-only.
+`Vec::pop_if(pred)` (1.86) pops the last element only if the predicate holds. `VecDeque::pop_front_if` and `pop_back_if` (needs 1.93) are the deque equivalents. `BinaryHeap::pop_if` is nightly-only.
+
+To move a field or element out of a `&mut` borrow, use `std::mem::take(&mut self.buf)` (or `mem::replace`), not `self.buf.clone()`.
 
 ## Borrow two elements mutably with `get_disjoint_mut` (1.86)
 
@@ -71,40 +69,40 @@ pub fn count<'a>(words: impl IntoIterator<Item = &'a str>) -> HashMap<&'a str, u
     }
     counts
 }
-
-// With String keys, `entry(name.to_owned())` allocates even on a hit.
-// Look up by &str first and allocate only on a miss.
-pub fn bump(counts: &mut HashMap<String, usize>, name: &str) {
-    if let Some(n) = counts.get_mut(name) {
-        *n += 1;
-    } else {
-        counts.insert(name.to_owned(), 1);
-    }
-}
 ```
 
-`or_insert_with(f)` runs `f` only on a miss. `and_modify(f).or_insert(v)` handles both cases.
+With `String` keys, `entry(name.to_owned())` allocates even on a hit: call `get_mut(name)` first and insert only on a miss. `or_insert_with(f)` runs `f` only on a miss. `and_modify(f).or_insert(v)` handles both cases.
 
-## Sort, deduplicate, and search
+## Sort and group
 
-`dedup` removes only *consecutive* duplicates, so sort first. Use `sort_unstable*` when equal elements are indistinguishable, as with primitives or when the key is the whole element. `binary_search` and `partition_point` (1.52) require sorted input. `is_sorted` is 1.82.
+`dedup` removes only *consecutive* duplicates, so sort first. `sort_unstable*` is fine whenever equal elements are indistinguishable. Floats are not `Ord`: sort with `total_cmp`, not `partial_cmp().unwrap()`. For a key that allocates, `sort_by_cached_key` computes it once per element instead of once per comparison. `chunk_by` (1.77) groups equal neighbors of a sorted slice without a manual loop.
 
 ```rust
+use std::cmp::Reverse;
+
 pub fn unique_sorted(v: &mut Vec<u32>) {
     v.sort_unstable();
     v.dedup();
 }
 
-pub fn insertion_point(sorted: &[u32], x: u32) -> usize {
-    sorted.partition_point(|&y| y < x) // first index where y >= x
+pub fn sort_scores(v: &mut [f64]) {
+    v.sort_unstable_by(f64::total_cmp); // NaN-safe, no unwrap
 }
 
-pub fn has(v: &[u32], x: u32) -> bool {
-    v.contains(&x)
+pub fn newest_first(v: &mut [(u32, String)]) {
+    v.sort_by_key(|(ts, _)| Reverse(*ts)); // descending without a custom closure
+}
+
+pub fn by_lowercase(v: &mut [String]) {
+    v.sort_by_cached_key(|s| s.to_lowercase()); // one allocation per element
+}
+
+pub fn run_lengths(sorted: &[u32]) -> Vec<(u32, usize)> {
+    sorted.chunk_by(|a, b| a == b).map(|g| (g[0], g.len())).collect()
 }
 ```
 
-`drain(range)` removes and yields a range with one shift. Use `VecDeque` when you pop from the front (`pop_front`, not `remove(0)`), and `BTreeMap::range(lo..hi)` / `pop_first()` (1.66) for ordered access. Use `swap_remove` when order does not matter. For appending, `extend`, `extend_from_slice`, and `append` beat a `push` loop.
+`drain(range)` removes and yields a range with one shift. Pop from the front of a `VecDeque` (`pop_front`), not `remove(0)`. Use `swap_remove` when order does not matter, and `BTreeMap::pop_first()` for ordered access. For appending, `extend`, `extend_from_slice`, and `append` beat a `push` loop.
 
 ## Avoid
 
@@ -139,12 +137,11 @@ Also avoid `while i < v.len() { … v.remove(i) … }` (quadratic: use `retain` 
 
 ## Older MSRV
 
-- **Below 1.93 / 1.91 / 1.88 / 1.87:** `VecDeque::pop_*_if`, `BTreeMap::extract_if`, `HashMap::extract_if`, `Vec::extract_if` are missing. Use `retain`, or `std::mem::take(v).into_iter().partition(pred)` when you need the removed items.
+- **Below 1.93 / 1.91 / 1.88 / 1.87:** `VecDeque::pop_*_if`, `BTreeMap::extract_if`, `HashMap::extract_if`, `Vec::extract_if` are missing. Use `retain`, or when you need the removed items: `let (taken, kept): (Vec<_>, Vec<_>) = std::mem::take(v).into_iter().partition(pred); *v = kept;`.
 - **Below 1.86:** no `pop_if` (`if v.last().is_some_and(..) { v.pop(); }`) and no `get_disjoint_mut` (use `split_at_mut`, or `swap`).
-- **Below 1.61:** no `retain_mut`.
 - `manual_pop_if` only fires when the MSRV is 1.86 or newer.
 
 ## Verify
 
-- `cargo clippy -- -W clippy::manual_retain -W clippy::manual_pop_if -W clippy::map_entry -W clippy::manual_contains -W clippy::stable_sort_primitive`. `stable_sort_primitive` is pedantic.
+- `cargo clippy` flags `manual_retain`, `manual_pop_if`, `map_entry`, and `manual_contains` by default. `stable_sort_primitive` is pedantic: run it with `-W clippy::stable_sort_primitive`.
 - Test the edges: empty collection, all match, none match, equal indices for `get_disjoint_mut`. Sort `HashMap` output before asserting on it (iteration order is unspecified).

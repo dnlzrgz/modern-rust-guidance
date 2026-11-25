@@ -17,10 +17,7 @@ Std grew a lot after most training data was frozen, and the same old patterns ke
 ## Defaults
 
 - Use edition 2024 for new code. It needs Rust 1.85 (see `edition-2024-changes`).
-- Reach for std before a crate. Where a crate is the usual answer (`thiserror`, `anyhow`, `once_cell`, `lazy_static`), the guide says so in a note and still gives the std route.
-- Prefer a named method over a hand-rolled formula, and a combinator over a `match` that only reshapes a value.
-- Return `Result` for anything the caller can cause. Panic only for bugs.
-- Let `cargo clippy` find the old patterns. Each guide lists the lints that detect them.
+- Where a crate is the usual answer (`thiserror`, `anyhow`, `once_cell`, `lazy_static`), the guide says so in a note and still gives the std route.
 
 ## What changed that agents miss
 
@@ -34,20 +31,28 @@ Std grew a lot after most training data was frozen, and the same old patterns ke
 | `(a + b - 1) / b`, `n % d == 0`, `(a + b) / 2` | `div_ceil` (unsigned), `is_multiple_of` (unsigned), `midpoint` | 1.73, 1.87, 1.85/1.87 |
 | `io::Error::new(ErrorKind::Other, e)` | `io::Error::other(e)` | 1.74 |
 | `if v.last().is_some_and(p) { v.pop(); }` | `Vec::pop_if` | 1.86 |
-| manual removal loops | `Vec::extract_if` (`HashMap` 1.88, `BTreeMap` 1.91) | 1.87 |
+| manual removal loops | `retain`; `Vec::extract_if` only when you need the removed items (`HashMap` 1.88, `BTreeMap` 1.91) | 1.87 |
 | `split_at_mut` index gymnastics | `get_disjoint_mut` | 1.86 |
 | `&s[..n]` on arbitrary `n` | `floor_char_boundary` | 1.91 |
 | `#![warn(…)]` blocks, bare `#[allow]` | `[lints]` in `Cargo.toml`, `#[expect(…, reason)]` | 1.74, 1.81 |
+| `c.set(c.get() + 1)` and other read-modify-write on a `Cell` | `Cell::update` | 1.88 |
+| `fs::metadata(p).is_ok()`, `Path::exists` (hides I/O errors) | `fs::exists(p)?` | 1.81 |
+| `iter::repeat(x).take(n)` | `iter::repeat_n(x, n)` | 1.82 |
+| a loop that groups equal neighbors | `<[T]>::chunk_by` | 1.77 |
+| checking whether a `LazyLock` has run, without forcing it | `LazyLock::get(&X)` (returns `Option`) | 1.94 |
 | `extern "C" {}`, `#[no_mangle]`, `static mut` refs | `unsafe extern`, `#[unsafe(no_mangle)]`, atomics or `LazyLock` | edition 2024 |
 
 ## Still unstable: do not suggest
 
-On stable Rust 1.100 these do not compile: `OnceLock::get_or_try_init`, signed `div_ceil` and `next_multiple_of`, `HashMap::try_insert`, `BinaryHeap::pop_if`, `VecDeque::extract_if`, and `Iterator::intersperse`, `array_chunks`, `map_windows`, `try_collect`, `collect_into`. If one looks perfect for the job, write the std-stable equivalent.
+On stable Rust 1.100 these do not compile: `OnceLock::get_or_try_init`, signed `div_ceil` and `next_multiple_of`, `HashMap::try_insert`, `BinaryHeap::pop_if`, `VecDeque::extract_if`, and `Iterator::intersperse`, `array_chunks`, `map_windows`, `try_collect`, `collect_into`. Use the std-stable equivalent instead:
+
+- `array_chunks` → `<[T]>::as_chunks` (1.88); `map_windows` → `<[T]>::array_windows` (1.94).
+- `intersperse`, `try_collect`, `collect_into`, and the rest → a plain loop or `fold`.
 
 ## Guides
 
 - `lazy-initialization`: global state, a lazily computed value, a runtime-initialized singleton, `thread_local!`, or replacing `lazy_static`, `once_cell`, or `static mut`.
-- `early-return-patterns`: flatten nested `match`/`if let`, bail out on `None` or `Err`, use `let … else`, `?`, `matches!`, or let chains.
+- `early-return-patterns`: flatten nested `match`/`if let`, bail out on `None` or `Err`, use `let … else`, `?`, or let chains.
 - `option-result-combinators`: test, convert, or default an `Option`/`Result`; `is_some_and`, `inspect`, `ok_or_else`, `transpose`, eager versus lazy arguments.
 - `integer-arithmetic`: overflow, rounding up, differences, averages, multiples, logs, clamping, or numeric casts and `TryFrom`.
 - `error-values`: define a custom error type, make `?` convert errors, report errors in `main`, wrap with `io::Error::other`, decide between `Result` and panic.

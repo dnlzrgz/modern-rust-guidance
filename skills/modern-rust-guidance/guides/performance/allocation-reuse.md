@@ -12,11 +12,11 @@ sources:
 
 # Allocation Reuse
 
-Each allocation and free has a cost, and growing a `Vec` or `String` one element at a time reallocates and copies. Reserve capacity when you know the size, keep one buffer alive across loop iterations, and move data out instead of cloning it. Do this where a profiler (DHAT, heaptrack, or `malloc` in a CPU profile) shows allocation is hot, not everywhere. See `measure-before-optimizing`.
+Each allocation and free has a cost, and growing a `Vec` or `String` one element at a time reallocates and copies. Reserve capacity when you know the size, keep one buffer alive across loop iterations, and move data out instead of cloning it. Do this where a profiler (DHAT, heaptrack, or `malloc` in a CPU profile) shows allocation is hot, not everywhere; see `measure-before-optimizing`.
 
 ## Reserve capacity when the size is known
 
-A `Vec` grows with an unspecified strategy (roughly doubling), so pushing N items can reallocate several times. `with_capacity`, `reserve`, and `reserve_exact` replace that with one allocation. `collect()` and `extend` already use the iterator's `size_hint`, so prefer them to a `push` loop. `String`, `HashMap`, and `HashSet` have `with_capacity` and `reserve` too.
+A `Vec` grows with an unspecified strategy (roughly doubling), so pushing N items can reallocate several times. `with_capacity`, `reserve`, and `reserve_exact` replace that with one allocation. `collect()` and `extend` already use the iterator's `size_hint`, so prefer them to a `push` loop. `String`, `HashMap`, and `HashSet` have `with_capacity` and `reserve` too. Reserve what you will use, not a giant capacity "just in case".
 
 ```rust
 pub fn join_lines(lines: &[String]) -> String {
@@ -26,6 +26,16 @@ pub fn join_lines(lines: &[String]) -> String {
         out.push_str(line);
         out.push('\n');
     }
+    out
+}
+```
+
+`filter` reports a lower `size_hint` of 0, so `collect()` or `extend` on a filtered iterator cannot reserve ahead. When most items pass, reserve the upper bound yourself:
+
+```rust
+pub fn keep_even(src: &[u32]) -> Vec<u32> {
+    let mut out = Vec::with_capacity(src.len()); // filter's lower bound is 0: no automatic reserve
+    out.extend(src.iter().copied().filter(|x| x % 2 == 0));
     out
 }
 ```
@@ -70,7 +80,7 @@ Reading lines into a reused `String` is the same pattern; see `buffered-io`. A r
 
 ## Overwrite with `clone_from`, move out with `mem::take`
 
-`a.clone_from(&b)` is `a = b.clone()` that may reuse `a`'s existing allocation (`Vec` and `String` do). To hand over a collection and leave an empty one behind, use `std::mem::take` instead of clone-then-clear:
+`a.clone_from(&b)` is `a = b.clone()` that may reuse `a`'s existing allocation (`Vec` and `String` do). To hand a collection over and leave an empty one behind, use `std::mem::take`, not clone-then-clear:
 
 ```rust
 pub struct Batcher {
@@ -80,18 +90,18 @@ pub struct Batcher {
 
 impl Batcher {
     pub fn flush(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.pending) // moves the Vec out: no copy, no clone
+        std::mem::take(&mut self.pending) // moves the Vec out, leaves an empty one
     }
 
     pub fn copy_last_from(&mut self, other: &Batcher) {
-        self.last.clone_from(&other.last); // reuses self.last's buffer when it is big enough
+        self.last.clone_from(&other.last); // reuses self.last's buffer if big enough
     }
 }
 ```
 
 ## Keep long-lived data compact
 
-For a collection that is built once and kept for a long time, `shrink_to_fit()` after construction frees spare capacity. It may reallocate and copy, so call it once, never in a loop, and not on short-lived or still-growing data. For immutable data, `Vec<T>::into_boxed_slice()` and `String::into_boxed_str()` drop the capacity field too (`type-size-and-layout`).
+For a collection that is built once and kept for a long time, `shrink_to_fit()` after construction frees spare capacity. It may reallocate and copy, so call it once, never in a loop, and not on short-lived or still-growing data. For immutable data, `Vec<T>::into_boxed_slice()` and `String::into_boxed_str()` drop the capacity field too (see `type-size-and-layout`).
 
 ## Avoid
 
@@ -121,11 +131,6 @@ pub fn pair() -> Vec<i32> {
     v
 }
 ```
-
-- `.clone()` on a `Vec` or `String` inside a loop only to read it: borrow it. See `needless-copies`.
-- `Vec::new()` plus a `push` loop over an iterator of known length: use `collect()` or `with_capacity`.
-- `shrink_to_fit()` in a hot loop.
-- Pre-allocating giant capacities "just in case". Reserve what you will use.
 
 > [!NOTE]
 > `SmallVec`, `ArrayVec`, and arena crates avoid heap allocation for short or short-lived data. They are out of scope for this guide.

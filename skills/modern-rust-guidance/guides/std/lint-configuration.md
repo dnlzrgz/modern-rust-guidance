@@ -6,7 +6,8 @@ clippy-lints: [allow_attributes, allow_attributes_without_reason, lint_groups_pr
 sources:
   - "Cargo Book: The [lints] section, The workspace.lints table (MIT/Apache-2.0)"
   - "Rust release notes 1.74 ([lints]) and 1.81 (#[expect], lint reasons) (MIT/Apache-2.0)"
-  - "Rustc Book: Lint levels, unfulfilled_lint_expectations (MIT/Apache-2.0)"
+  - "Rustc Book: Lint levels, unfulfilled_lint_expectations, check-cfg (MIT/Apache-2.0)"
+  - "Rust release notes 1.80 (check-cfg lint config), 1.100 ([lints.cargo]) (MIT/Apache-2.0)"
   - "Microsoft Pragmatic Rust Guidelines: M-LINT-OVERRIDE-EXPECT (MIT)"
   - "Clippy docs: configuration, allow_attributes, lint_groups_priority (MIT/Apache-2.0)"
 ---
@@ -23,14 +24,16 @@ Put lint levels in `Cargo.toml`, not in `#![warn(...)]` blocks at the top of `li
 # Root Cargo.toml
 [workspace]
 members = ["crates/*"]
-resolver = "3"
+resolver = "2"
 
 [workspace.package]
-edition = "2024"
-rust-version = "1.85"   # Clippy reads this as its MSRV; no clippy.toml entry needed
+edition = "2021"        # "2024" needs 1.85
+rust-version = "1.81"   # Clippy reads this as its MSRV; no clippy.toml entry needed
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny" # not "forbid": `forbid` cannot be overridden, so an FFI member crate could not `#[allow]` it
+# Custom cfgs (fuzzing, loom, ...) must be declared here, or `unexpected_cfgs` warns on them (1.80).
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)', 'cfg(loom)'] }
 
 [workspace.lints.clippy]
 # A lint GROUP needs a lower priority so the single lints below can override it.
@@ -51,7 +54,7 @@ rust-version.workspace = true
 workspace = true   # `[lints]` cannot mix `workspace = true` with its own entries
 ```
 
-Priority is a signed integer; higher wins, default 0. Without `priority = -1` on the group, Cargo ignores the order in the file, and `clippy::lint_groups_priority` (deny by default) rejects the table. `pedantic` is opinionated: it is shown to demonstrate priority, so enable it only if the team wants it. Keep `warn` in `Cargo.toml` and make CI fail with `cargo clippy --all-targets --all-features -- -D warnings`.
+Priority is a signed integer; higher wins, default 0. Without `priority = -1` on the group, Cargo ignores the order in the file, and `clippy::lint_groups_priority` (deny by default) rejects the table. `pedantic` is opinionated: it is shown to demonstrate priority, so enable it only if the team wants it. Cargo's own lints (needs 1.100) use a third table, `[lints.cargo]`. Keep `warn` in `Cargo.toml` and make CI fail with `cargo clippy --all-targets --all-features -- -D warnings`.
 
 ## Suppress with `#[expect]` and a reason
 
@@ -64,7 +67,7 @@ pub fn fold(hash: u64) -> u32 {
 }
 ```
 
-Use `#[allow(lint, reason = "…")]` only when the lint fires in some configurations and not others (`cfg`, features, platform-specific code), because `#[expect]` would warn where it stays quiet. The `allow_attributes` lint (restriction group, 1.81+) flags every outer `#[allow]`, including inside `cfg_attr`, but ignores `#![allow]` and macro output. Pair it with `allow_attributes_without_reason`, and exempt the rare legitimate `allow` explicitly.
+Use `#[allow(lint, reason = "…")]` only when the lint fires in some configurations and not others (`cfg`, features, platform-specific code), because `#[expect]` would warn where it stays quiet. The `allow_attributes` lint (restriction group, 1.81+) flags every outer `#[allow]`, including inside `cfg_attr`, but ignores `#![allow]` and macro output. `allow_attributes_without_reason` (restriction) also covers `#[expect]`, so it is not redundant with `allow_attributes`: enable both, and exempt the rare legitimate `allow` explicitly.
 
 ## Configure Clippy itself
 
@@ -72,7 +75,7 @@ Clippy takes its MSRV from `rust-version` in `Cargo.toml` (`CARGO_PKG_RUST_VERSI
 
 ```toml
 # clippy.toml
-msrv = "1.85"
+msrv = "1.81"
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 ```
@@ -106,4 +109,5 @@ pub fn sum(v: &[u32]) -> u32 {
 
 - `cargo clippy --all-targets --all-features -- -D warnings` passes, and `rg "allow\("` in `src/` shows only entries with a `reason`.
 - `unfulfilled_lint_expectations` is a warning. A new one means a suppression can be deleted.
-- After moving lints into `[workspace.lints]`, run `cargo metadata --format-version 1 >/dev/null` to catch syntax mistakes, then `cargo clippy` in one member.
+- After moving lints into `[workspace.lints]`, run `cargo clippy` in one member to confirm it picks them up.
+- `allow_attributes` and `allow_attributes_without_reason` are restriction lints: they are off unless you enable them in `[lints.clippy]` as above.

@@ -303,8 +303,20 @@ fn msrv_cmd(parsed: &Parsed) -> Output {
     };
     let start =
         fs::canonicalize(&start).map_err(|e| format!("cannot read {}: {e}", start.display()))?;
-    Ok(match msrv::detect(&start) {
-        Some(found) => format!("MSRV {} (from {})\n", found.version, found.source),
+    let declared = msrv::declared(&start);
+    let conflict = declared.conflicting_clippy().map(|clippy| {
+        format!(
+            "clippy msrv {} (from {}) differs; mrg uses `rust-version`\n",
+            clippy.version, clippy.source
+        )
+    });
+    Ok(match declared.effective() {
+        Some(found) => format!(
+            "MSRV {} (from {})\n{}",
+            found.version,
+            found.source,
+            conflict.unwrap_or_default()
+        ),
         None => "MSRV not declared (no `rust-version` in Cargo.toml, no `msrv` in clippy.toml)\n"
             .to_owned(),
     })
@@ -321,13 +333,16 @@ fn scan_cmd(parsed: &Parsed) -> Output {
     eprintln!(
         "mrg: scan builds the project in {dir} with `cargo clippy` (build scripts and proc macros run)."
     );
-    let findings = scan::run(Path::new(dir), parsed.flag("all-targets"), &lints)?;
+    let scanned = scan::run(Path::new(dir), parsed.flag("all-targets"), &lints)?;
     let ordered = catalog::hubs_first(&guides);
-    let groups = scan::group(&ordered, &findings);
+    let groups = scan::group(&ordered, &scanned.findings);
     Ok(if parsed.flag("json") {
+        if let Some(note) = scan::unlocated_note(scanned.unlocated) {
+            eprintln!("mrg: {note}");
+        }
         json_line(&scan::to_json(&groups))
     } else {
-        scan::render(&groups, lints.len())
+        scan::render(&groups, lints.len(), scanned.unlocated)
     })
 }
 
@@ -374,10 +389,27 @@ fn check_cmd(parsed: &Parsed) -> Output {
         .as_deref()
         .and_then(Path::parent)
         .and_then(|p| fs::read_to_string(p.join("index.md")).ok());
-    let (guides, mut errors) = check::structure(&loaded.sources, index_md.as_deref());
+    let check::Structure {
+        guides,
+        mut errors,
+        flawed,
+    } = check::structure(&loaded.sources, index_md.as_deref());
     let (compile, clippy) = (parsed.flag("compile"), parsed.flag("clippy"));
     if compile || clippy {
-        errors.extend(blocks::check(&guides, compile, clippy)?);
+        let (sound, skipped): (Vec<&Guide>, Vec<&Guide>) =
+            guides.iter().partition(|g| !flawed.contains(&g.path));
+        for guide in skipped {
+            eprintln!(
+                "mrg: skipped compile/clippy checks for {} (it has structure errors)",
+                guide.path
+            );
+        }
+        errors.extend(blocks::check(
+            &sound,
+            compile,
+            clippy,
+            loaded.dir.as_deref(),
+        )?);
     }
     if errors.is_empty() {
         let mut what = String::from("structure");

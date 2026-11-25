@@ -80,31 +80,16 @@ mod tests {
 
 ## Pass the time in
 
-The simplest clock is a parameter. `Instant` has no constructor, but `Instant::now() + Duration` makes any later instant, so a test controls time by arithmetic.
+The simplest clock is a parameter, and the simplest seam is a pure function of it. `Instant` has no constructor, but `Instant::now() + Duration` makes any later instant, so a test controls time by arithmetic.
 
 ```rust
 use std::time::{Duration, Instant};
 
-/// Allows one action per `min_gap`. The caller supplies the time.
-pub struct Throttle {
-    min_gap: Duration,
-    last: Option<Instant>,
-}
-
-impl Throttle {
-    pub fn new(min_gap: Duration) -> Self {
-        Self { min_gap, last: None }
-    }
-
-    pub fn allow(&mut self, now: Instant) -> bool {
-        let ok = match self.last {
-            None => true,
-            Some(t) => now.duration_since(t) >= self.min_gap,
-        };
-        if ok {
-            self.last = Some(now);
-        }
-        ok
+/// True when at least `gap` has passed since the last action. The caller owns `last` and supplies `now`.
+pub fn due(last: Option<Instant>, now: Instant, gap: Duration) -> bool {
+    match last {
+        None => true,
+        Some(t) => now.duration_since(t) >= gap,
     }
 }
 
@@ -112,23 +97,41 @@ impl Throttle {
 mod tests {
     use super::*;
 
-    // No sleeping: instant and cannot flake.
-    #[test]
-    fn allows_again_after_the_gap() {
+    #[test] // no sleeping: instant, cannot flake
+    fn due_again_after_the_gap() {
         let t0 = Instant::now();
-        let mut throttle = Throttle::new(Duration::from_secs(10));
-        assert!(throttle.allow(t0));
-        assert!(!throttle.allow(t0 + Duration::from_secs(9)));
-        assert!(throttle.allow(t0 + Duration::from_secs(10)));
+        let gap = Duration::from_secs(10);
+        assert!(due(None, t0, gap));
+        assert!(!due(Some(t0), t0 + Duration::from_secs(9), gap));
+        assert!(due(Some(t0), t0 + gap, gap));
     }
 }
 ```
 
-Production code calls `throttle.allow(Instant::now())`. If time is needed deep in a call chain, store a `Box<dyn Fn() -> Instant>` or a one-method `Clock` trait with `SystemClock` and a test fake instead.
+Production code calls `due(self.last, Instant::now(), gap)`. If time is needed deep in a call chain, store a `Box<dyn Fn() -> Instant>` or a one-method `Clock` trait with `SystemClock` and a test fake instead.
 
 ## Pass closures for small effects
 
-Environment lookups, random numbers, and id generation fit a closure parameter (`impl Fn(&str) -> Option<String>`, `impl FnMut() -> u64`). A trait is worth it only when the boundary has several operations, such as a store with `get` and `put`. Keep the trait to the operations the code uses, and write the fake as a plain struct over a `HashMap` or `Vec`.
+Environment lookups, random numbers, and id generation fit a closure parameter. Real code hands in `|key| std::env::var(key).ok()`; a test hands in a literal, and never has to call `set_var` (see `test-isolation`):
+
+```rust
+pub fn port(get: impl Fn(&str) -> Option<String>) -> u16 {
+    get("PORT").and_then(|v| v.parse().ok()).unwrap_or(8080)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn port_comes_from_the_environment_or_defaults() {
+        assert_eq!(port(|k| (k == "PORT").then(|| "9000".to_owned())), 9000);
+        assert_eq!(port(|_| None), 8080);
+    }
+}
+```
+
+Do the same for arguments: parse from `impl Iterator<Item = String>`, and call it with `std::env::args().skip(1)` in `main`. A trait is worth it only when the boundary has several operations, such as a store with `get` and `put`. Keep the trait to the operations the code uses, and write the fake as a plain struct over a `HashMap` or `Vec`.
 
 ## Split decisions from I/O (sans-IO)
 
@@ -136,17 +139,12 @@ For protocols and parsers, write a state machine that takes bytes and returns ev
 
 ## Avoid
 
-- `File::open`, `SystemTime::now()`, or `env::var` inside logic that makes decisions.
-- `Default::default()` constructors that touch the file system or network. Take the I/O object as an argument.
+- `File::open`, `SystemTime::now()`, or `env::var` inside logic that makes decisions, and `Default::default()` constructors that touch the file system or network.
+- `#[cfg(test)]` branches in production code that swap in fakes: the tested code is then not the shipped code. Inject the dependency instead.
 - A trait with one implementation that exists only to be mocked, around code that is already pure. Test pure functions directly.
-- `sleep` in tests to wait for time to pass. Inject the clock.
-- Fakes that live in the library without a `test-util` feature gate (`test-organization`).
-
-> [!NOTE]
-> Mocking crates such as `mockall` are out of scope for this guide. The `Read`/`Write`, clock, and closure seams above need none of them.
+- Fakes that live in the library without a `test-util` feature gate (see `test-organization`). Mocking crates such as `mockall` are out of scope; the seams above need none.
 
 ## Verify
 
 - Every function that does I/O takes its source or sink as a parameter, and the real one is created only in `main` or a thin constructor.
 - Each error path has a test that makes the fake fail on purpose (for example `FailAfter` above).
-- Tests do not sleep, bind fixed ports, or read the real environment; see `test-isolation`.

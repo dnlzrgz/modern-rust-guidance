@@ -11,11 +11,11 @@ sources:
 
 # Release Profile Tuning
 
-Build settings change speed, binary size, build time, and debuggability without touching code. Change them one at a time and measure each (`measure-before-optimizing`). Cargo reads profiles only from the workspace-root `Cargo.toml`. Profile settings in dependencies are ignored, so this matters for binaries, not libraries.
+Build settings change speed, binary size, build time, and debuggability without touching code. Change them one at a time and measure each (see `measure-before-optimizing`). Cargo reads profiles only from the workspace-root `Cargo.toml`. Profile settings in dependencies are ignored, so this matters for binaries, not libraries.
 
 ## Know the defaults
 
-`[profile.release]` defaults: `opt-level = 3`, `debug = false`, `strip = "none"`, `lto = false`, `codegen-units = 16`, `panic = "unwind"`. Writing `opt-level = 3` changes nothing.
+`[profile.release]` defaults: `opt-level = 3`, `debug = false`, `strip = "none"`, `debug-assertions = false`, `overflow-checks = false`, `lto = false`, `panic = "unwind"`, `incremental = false`, `codegen-units = 16`. Writing `opt-level = 3` changes nothing. Release has no overflow checks or `debug_assert!`, so it behaves differently from `dev`.
 
 ## Start here for speed
 
@@ -35,6 +35,8 @@ codegen-units = 1
 ```
 
 Build with `cargo build --profile dist`. The output goes to `target/dist/`.
+
+To A/B a setting without editing `Cargo.toml`, override it from the environment: `CARGO_PROFILE_RELEASE_LTO=fat CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 cargo build --release` (the pattern is `CARGO_PROFILE_<name>_<KEY>`). It rebuilds into `target/release`, so copy the old binary aside first.
 
 ## Get `lto` values right
 
@@ -67,34 +69,34 @@ strip = true      # same as "symbols"; "debuginfo" keeps symbol names
 
 `opt-level = 3` is sometimes slower than `2`, and `"s"`/`"z"` are not always smaller, so measure. Stripped binaries lose names in backtraces and profiles, so never strip the build you profile.
 
+## Tune dependencies separately
+
+A package override changes settings for chosen packages only. `"*"` matches every dependency but not workspace members, and overrides cannot set `panic`, `lto`, or `rpath`:
+
+```toml
+[profile.release.package."*"]
+opt-level = "s"   # dependencies only: your own crates keep the release settings
+```
+
 ## Do not use `target-cpu=native` for shipped binaries
 
 `-C target-cpu=native` compiles for the CPU of the build machine. rustc states the binary must only run on CPUs with all of that CPU's features, so it can crash with an illegal-instruction error elsewhere. That includes CI builders that differ from production, container images, and binaries downloaded by users. Use it only when the build host is the run host. Do not commit it to a shared `.cargo/config.toml`, where it affects every contributor and CI job.
 
-For a distributed x86-64 binary, either pick a named baseline you are willing to require, such as `-C target-cpu=x86-64-v3` (see `rustc --print target-cpus`), or keep the default and select fast paths at run time with `is_x86_feature_detected!`.
+For a distributed x86-64 binary, either pick a named baseline you are willing to require, such as `-C target-cpu=x86-64-v3` (list them with `rustc --print target-cpus`), or keep the default and select fast paths at run time with `is_x86_feature_detected!`.
 
 ## Profile-guided optimization (PGO)
 
-PGO feeds real execution data back into the compiler. It needs `llvm-profdata` (the `llvm-tools-preview` rustup component or an LLVM install), so ask the user before installing anything. Flags must match between the two builds, paths should be absolute, and `--target` keeps the flags away from build scripts:
+PGO feeds real run data back into the compiler. It needs `llvm-profdata` (ask before installing), identical flags for both builds, and a representative workload. `--target` keeps the flags off build scripts.
 
 ```sh
-RUSTFLAGS="-Cprofile-generate=/tmp/pgo-data" cargo build --release --target <triple>
-./target/<triple>/release/app <typical workload>   # run it on representative input
-llvm-profdata merge -o /tmp/pgo-data/merged.profdata /tmp/pgo-data
-RUSTFLAGS="-Cprofile-use=/tmp/pgo-data/merged.profdata" cargo build --release --target <triple>
+RUSTFLAGS="-Cprofile-generate=/tmp/pgo" cargo build --release --target <triple>
+./target/<triple>/release/app <typical workload>
+llvm-profdata merge -o /tmp/pgo/merged.profdata /tmp/pgo
+RUSTFLAGS="-Cprofile-use=/tmp/pgo/merged.profdata" cargo build --release --target <triple>
 ```
-
-It cannot be applied when users build with `cargo install`, and it is only as good as the workload you profile with.
 
 > [!NOTE]
 > Alternative allocators (`mimalloc`, `tikv-jemallocator`) can also change speed and memory use, but they are crates and out of scope here. Measure on the target platform.
-
-## Avoid
-
-- Setting profile keys in a member crate's `Cargo.toml` or a dependency's. Only the workspace root counts.
-- Turning on every knob at once, then not knowing which helped or hurt.
-- `lto = "fat"` plus `codegen-units = 1` in `dev` or `test` profiles, which only slows the edit-compile loop.
-- `panic = "abort"` or `strip = true` in the profile you use for profiling or debugging.
 
 ## Verify
 

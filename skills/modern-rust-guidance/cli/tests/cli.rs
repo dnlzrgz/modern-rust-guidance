@@ -373,3 +373,138 @@ fn embedded_guides_work_without_guides_dir() {
         .unwrap();
     assert!(out.status.success());
 }
+
+/// Copies the fixture guides to a fresh directory under the test tmp dir.
+fn copy_fixtures(name: &str) -> PathBuf {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
+    let _ = std::fs::remove_dir_all(&dir);
+    for category in ["std", "performance", "testing"] {
+        std::fs::create_dir_all(dir.join(category)).unwrap();
+        for entry in std::fs::read_dir(guides().join(category)).unwrap() {
+            let entry = entry.unwrap();
+            std::fs::copy(entry.path(), dir.join(category).join(entry.file_name())).unwrap();
+        }
+    }
+    dir
+}
+
+fn check_in(dir: &Path, extra: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_mrg"))
+        .arg("check")
+        .args(extra)
+        .arg("--guides-dir")
+        .arg(dir)
+        .env_remove("MRG_GUIDES_DIR")
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn check_reports_version_mentions_and_unknown_see_targets() {
+    let dir = copy_fixtures("bad-prose");
+    let path = dir.join("std/early-return.md");
+    let text = std::fs::read_to_string(&path).unwrap().replace(
+        "## Avoid",
+        "Uses `x` (1.99) and see `no-such-guide`.\n\nOptional `y` (needs 1.98) and see also `std`.\n\n## Avoid",
+    );
+    std::fs::write(&path, text).unwrap();
+    let out = check_in(&dir, &[]);
+    assert_eq!(out.status.code(), Some(1));
+    let err = stderr(&out);
+    assert!(
+        err.contains("mentions Rust 1.99 but rust-version is 1.80 (mark it 'needs 1.99' if optional, or raise rust-version)"),
+        "{err}"
+    );
+    assert!(
+        err.contains("`see `no-such-guide`` does not name an existing guide"),
+        "{err}"
+    );
+    assert!(!err.contains("1.98"), "{err}");
+    assert!(!err.contains("`std``"), "{err}");
+    assert!(err.contains("2 problems found"), "{err}");
+}
+
+#[test]
+fn check_skips_block_checks_for_guides_with_structure_errors() {
+    if !tool_ok("rustc", "--version") {
+        return;
+    }
+    let dir = copy_fixtures("skipped-blocks");
+    let path = dir.join("std/early-return.md");
+    // A broken rust block, plus a structure error (no `## Verify`).
+    let text = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("## Verify", "## Check")
+        .replace(
+            "    v + 1\n}\n```\n\n## Avoid",
+            "    v + undefined_name\n}\n```\n\n## Avoid",
+        );
+    std::fs::write(&path, text).unwrap();
+    let out = check_in(&dir, &["--compile"]);
+    assert_eq!(out.status.code(), Some(1));
+    let err = stderr(&out);
+    assert!(err.contains("missing `## Verify`"), "{err}");
+    assert!(
+        err.contains("skipped compile/clippy checks for std/early-return.md"),
+        "{err}"
+    );
+    assert!(!err.contains("block does not compile"), "{err}");
+}
+
+#[test]
+fn check_compile_leaves_no_temp_dir_behind() {
+    if !tool_ok("rustc", "--version") {
+        return;
+    }
+    // Private TMPDIR so other tests' work dirs can't interfere; the child's pid identifies
+    // its work dir in the repo's shared `target/mrg-check`.
+    let tmp = Path::new(env!("CARGO_TARGET_TMPDIR")).join("leak-check-tmp");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let child = Command::new(env!("CARGO_BIN_EXE_mrg"))
+        .args(["check", "--compile", "--guides-dir"])
+        .arg(guides())
+        .env_remove("MRG_GUIDES_DIR")
+        .env("TMPDIR", &tmp)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("run mrg");
+    let pid = child.id();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    let leaked_tmp: Vec<_> = std::fs::read_dir(&tmp).unwrap().flatten().collect();
+    assert!(leaked_tmp.is_empty(), "{leaked_tmp:?}");
+    let repo_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/mrg-check");
+    let prefix = format!("{pid}-");
+    let leaked_repo: Vec<_> = std::fs::read_dir(&repo_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with(&prefix))
+        .collect();
+    assert!(leaked_repo.is_empty(), "{leaked_repo:?}");
+}
+
+#[test]
+fn msrv_prefers_rust_version_and_prints_a_differing_clippy_msrv() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("msrv-both");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("Cargo.toml"),
+        "[package]\nname = \"p\"\nrust-version = \"1.80\"\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("clippy.toml"), "msrv = \"1.70\"\n").unwrap();
+    std::fs::write(dir.join(".clippy.toml"), "msrv = \"1.60\"\n").unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_mrg"))
+        .args(["msrv", "--manifest-path"])
+        .arg(dir.join("Cargo.toml"))
+        .output()
+        .unwrap();
+    let text = stdout(&out);
+    assert!(text.starts_with("MSRV 1.80 (from "), "{text}");
+    assert!(text.contains("clippy msrv 1.70 (from "), "{text}");
+    assert!(text.contains("differs; mrg uses `rust-version`"), "{text}");
+    assert!(!text.contains("1.60"), "{text}");
+}

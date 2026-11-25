@@ -14,6 +14,10 @@ pub struct Version {
 }
 
 impl Version {
+    pub fn minor(self) -> u32 {
+        self.minor
+    }
+
     pub fn parse(text: &str) -> Option<Self> {
         let mut parts = text.trim().split('.');
         let major = parts.next()?.parse().ok()?;
@@ -55,9 +59,38 @@ fn found(version: &str, path: &Path, what: &str) -> Option<Msrv> {
     })
 }
 
+/// Both MSRV declarations found from a directory.
+#[derive(Debug, PartialEq)]
+pub struct Declared {
+    /// Cargo `rust-version` (package, or inherited from the workspace).
+    pub cargo: Option<Msrv>,
+    /// clippy's `msrv` from `clippy.toml` (before `.clippy.toml`, as clippy does).
+    pub clippy: Option<Msrv>,
+}
+
+impl Declared {
+    /// The MSRV `mrg` uses. `rust-version` wins over clippy's `msrv`: it describes
+    /// what the code may use, while clippy's `msrv` only tunes lints.
+    pub fn effective(self) -> Option<Msrv> {
+        self.cargo.or(self.clippy)
+    }
+
+    /// The clippy `msrv` when it exists next to a `rust-version` and differs from it.
+    pub fn conflicting_clippy(&self) -> Option<&Msrv> {
+        let (cargo, clippy) = (self.cargo.as_ref()?, self.clippy.as_ref()?);
+        (cargo.version != clippy.version).then_some(clippy)
+    }
+}
+
 /// Detects the MSRV, starting in directory `start`.
 pub fn detect(start: &Path) -> Option<Msrv> {
+    declared(start).effective()
+}
+
+/// Finds Cargo's `rust-version` and clippy's `msrv`, starting in directory `start`.
+pub fn declared(start: &Path) -> Declared {
     let mut visited: Vec<PathBuf> = Vec::new();
+    let mut cargo = None;
     let mut first_manifest = true;
     for dir in start.ancestors() {
         visited.push(dir.to_path_buf());
@@ -69,7 +102,8 @@ pub fn detect(start: &Path) -> Option<Msrv> {
             first_manifest = false;
             if toml.has_section("package") {
                 if let Some(v) = toml.string("package", "rust-version") {
-                    return found(v, &path, "[package] rust-version");
+                    cargo = found(v, &path, "[package] rust-version");
+                    break;
                 }
                 if toml.bool("package", "rust-version.workspace") != Some(true) {
                     break;
@@ -78,20 +112,21 @@ pub fn detect(start: &Path) -> Option<Msrv> {
         }
         if toml.has_section("workspace") {
             if let Some(v) = toml.string("workspace.package", "rust-version") {
-                return found(v, &path, "[workspace.package] rust-version");
+                cargo = found(v, &path, "[workspace.package] rust-version");
             }
             break;
         }
     }
-    visited.iter().find_map(|dir| {
-        [".clippy.toml", "clippy.toml"]
+    let clippy = visited.iter().find_map(|dir| {
+        ["clippy.toml", ".clippy.toml"]
             .into_iter()
             .find_map(|name| {
                 let path = dir.join(name);
                 let toml = read_toml(&path)?;
                 found(toml.string("", "msrv")?, &path, "msrv")
             })
-    })
+    });
+    Declared { cargo, clippy }
 }
 
 #[cfg(test)]
@@ -173,6 +208,36 @@ mod tests {
         let dir = tempdir("dotclippy");
         fs::write(dir.join(".clippy.toml"), "msrv = \"1.72\"\n").unwrap();
         assert_eq!(detect(&dir).unwrap().version, v("1.72"));
+    }
+
+    #[test]
+    fn clippy_toml_takes_precedence_over_dot_clippy_toml() {
+        let dir = tempdir("both");
+        fs::write(dir.join(".clippy.toml"), "msrv = \"1.72\"\n").unwrap();
+        fs::write(dir.join("clippy.toml"), "msrv = \"1.73\"\n").unwrap();
+        let msrv = detect(&dir).unwrap();
+        assert_eq!(msrv.version, v("1.73"));
+        assert!(msrv.source.ends_with("clippy.toml (msrv)"));
+        assert!(!msrv.source.contains(".clippy.toml"));
+    }
+
+    #[test]
+    fn rust_version_wins_over_clippy_msrv_and_conflicts_are_reported() {
+        let dir = tempdir("conflict");
+        fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname = \"x\"\nrust-version = \"1.80\"\n",
+        )
+        .unwrap();
+        fs::write(dir.join("clippy.toml"), "msrv = \"1.70\"\n").unwrap();
+        let declared = declared(&dir);
+        assert_eq!(declared.conflicting_clippy().unwrap().version, v("1.70"));
+        assert_eq!(declared.effective().unwrap().version, v("1.80"));
+        // Equal versions do not conflict, and a lone declaration never does.
+        fs::write(dir.join("clippy.toml"), "msrv = \"1.80.0\"\n").unwrap();
+        assert!(super::declared(&dir).conflicting_clippy().is_none());
+        fs::remove_file(dir.join("clippy.toml")).unwrap();
+        assert!(super::declared(&dir).conflicting_clippy().is_none());
     }
 
     #[test]

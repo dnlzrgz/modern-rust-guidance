@@ -2,7 +2,7 @@
 name: test-assertions
 description: Write assertions that explain their own failure, including should_panic with expected, ignored tests with a reason, Result-returning tests, matches!, and float comparisons.
 rust-version: "1.70"
-clippy-lints: [should_panic_without_expect, ignore_without_reason, bool_assert_comparison, assertions_on_result_states, manual_assert]
+clippy-lints: [should_panic_without_expect, ignore_without_reason, bool_assert_comparison, assertions_on_result_states]
 sources:
   - "The Rust Book, ch. 11 Writing Tests and Running Tests (MIT/Apache-2.0)"
   - "std docs: assert_matches!, core::panic::Location (#[track_caller]) (MIT/Apache-2.0)"
@@ -13,7 +13,7 @@ sources:
 
 # Test Assertions
 
-A failing test should say what was wrong without a debugger. Compare whole values with `assert_eq!`, pin panics to their message, return `Result` from tests that use `?`, and give every `#[ignore]` a reason. Unwrapping in test code is fine; the habits below are about the failure output.
+A failing test should say what was wrong without a debugger. Compare whole values with `assert_eq!`, pin panics to their message, return `Result` from tests that use `?`, and give every `#[ignore]` a reason.
 
 ## Compare values, not states
 
@@ -31,11 +31,7 @@ pub fn parse_digit(s: &str) -> Result<u8, ParseError> {
         .ok_or(ParseError::BadDigit(c))
 }
 
-/// Halves `n`.
-///
-/// # Panics
-///
-/// Panics if `n` is zero.
+/// Halves `n`. Panics if `n` is zero.
 pub fn half_of_nonzero(n: u32) -> u32 {
     assert!(n != 0, "n must be non-zero");
     n / 2
@@ -45,28 +41,28 @@ pub fn half_of_nonzero(n: u32) -> u32 {
 mod tests {
     use super::*;
 
-    // Whole-value comparison: a failure prints both sides, `Err` included.
+    // A failure prints both sides, `Err` included.
     #[test]
     fn empty_input_is_an_error() {
         assert_eq!(parse_digit(""), Err(ParseError::Empty));
     }
 
-    // Error type without PartialEq, or only the variant matters: matches! plus a
-    // message. The message belongs to `assert!`, not to `matches!`.
+    // No PartialEq, or only the variant matters: `matches!` plus a message
+    // (the message belongs to `assert!`).
     #[test]
     fn non_digit_names_the_character() {
         let err = parse_digit("x").unwrap_err();
         assert!(matches!(err, ParseError::BadDigit('x')), "got {err:?}");
     }
 
-    // `?` keeps setup short. The test fails with `Error: <Debug of the Err>`.
+    // `?` keeps setup short; a failure prints `Error: <Debug of the Err>`.
     #[test]
     fn parses_a_digit() -> Result<(), ParseError> {
         assert_eq!(parse_digit("7")?, 7);
         Ok(())
     }
 
-    // Pin the message, or any other panic (a typo'd index) also passes.
+    // Pin the message, or any other panic also passes.
     #[test]
     #[should_panic(expected = "n must be non-zero")]
     fn zero_is_rejected() {
@@ -74,13 +70,13 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs the 4 GB fixture; run with `cargo test -- --ignored`"]
+    #[ignore = "needs the 4 GB fixture"]
     fn huge_input() {}
 }
 ```
 
 ```rust,legacy
-// lint: should_panic_without_expect, ignore_without_reason, bool_assert_comparison, assertions_on_result_states, manual_assert
+// lint: should_panic_without_expect, ignore_without_reason, bool_assert_comparison, assertions_on_result_states
 pub fn half(n: u32) -> u32 { assert!(n != 0); n / 2 }
 pub fn parse(s: &str) -> Result<u8, std::num::ParseIntError> { s.parse() }
 
@@ -91,45 +87,30 @@ mod tests {
     #[test]
     #[should_panic] // passes for ANY panic
     fn zero_is_rejected() { half(0); }
-
     #[test]
     #[ignore] // why? for how long?
     fn slow() {}
-
     #[test]
     fn parses() {
         assert!(parse("7").is_ok()); // hides the error value on failure
         assert_eq!(half(4) == 2, true); // use assert!(half(4) == 2)
-        let n = parse("7").unwrap();
-        if n != 7 { panic!("wrong value {n}"); } // assert_eq!(n, 7)
     }
 }
 ```
 
-- `expected` is a substring match. Pick the stable part of the message. Use `should_panic` only when the panic is the documented contract; return `Result` for errors. A `should_panic` test can't also return `Result`.
-- `assert!(r.is_ok())` throws away the error. Use `r.unwrap()`, `?`, or `assert_eq!(r, Ok(..))`. For `is_err()`, use `assert_eq!(r, Err(..))` or `r.unwrap_err()`.
-- A `?` failure shows the error but no line number. In a test with many fallible steps, use `.expect("what was being done")` so the panic carries a location.
-- Never `#[ignore]` a flaky test to get green. Fix it (`test-isolation`) or delete it. Run ignored tests with `cargo test -- --ignored`, or everything with `-- --include-ignored`.
+- `expected` is a substring match. Pick the stable part of the message. Use `should_panic` only when the panic is the documented contract; return `Result` for errors.
+- `assert!(r.is_ok())` throws away the error: use `r.unwrap()`, `?`, or `assert_eq!(r, Ok(..))`. A `?` failure shows no line number, so with many fallible steps use `.expect("what was being done")`.
+- Never `#[ignore]` a flaky test to get green: fix it (see `test-isolation`) or delete it. `cargo test -- --ignored` runs only ignored tests, `-- --include-ignored` all.
 
 ## Add context where the value alone is unclear
 
-`assert_eq!(got, want, "input {input:?}")` takes a format string. Use it in loops and tables so the failing row is named (`meaningful-tests`).
+`assert_eq!(got, want, "input {input:?}")` takes a format string. Use it in loops and tables so the failing row is named (see `meaningful-tests`).
 
-For pattern checks on Rust 1.96+, `assert_matches!` (not in the prelude) prints the actual value and accepts guards and a message:
-
-```rust
-use std::assert_matches;
-
-#[test]
-fn non_digit_names_the_character() {
-    let got: Result<u8, char> = Err('x');
-    assert_matches!(got, Err(c) if c.is_alphabetic());
-}
-```
+`std::assert_matches!` (needs 1.96; not in the prelude) prints the actual value and accepts guards and a message: `assert_matches!(got, Err(c) if c.is_alphabetic())`. On older toolchains use `assert!(matches!(..), "got {got:?}")` as above; `clippy::incompatible_msrv` flags `assert_matches!` when the project's MSRV is older.
 
 ## Compare floats with a tolerance, from a helper
 
-Exact `==` on computed floats fails on rounding. `f64::EPSILON` is the gap near 1.0, so it is the wrong tolerance for large values. Pick a tolerance that matches the computation. `#[track_caller]` makes a failure point at the calling test, not at the helper. A NaN never passes, because `NaN <= tol` is false.
+Exact `==` on computed floats fails on rounding, and `f64::EPSILON` (the gap near 1.0) is the wrong tolerance for large values: pick one that matches the computation. `#[track_caller]` makes a failure point at the calling test. A NaN never passes, because `NaN <= tol` is false.
 
 ```rust
 #[cfg(test)]
@@ -148,7 +129,7 @@ mod tests {
 
 ## Let tests unwrap, keep production strict
 
-If you enable `unwrap_used`, `expect_used`, `panic`, or `indexing_slicing`, exempt test code in `clippy.toml` instead of sprinkling `#[allow]`:
+If you enable `unwrap_used`, `expect_used`, `panic`, or `indexing_slicing` (all restriction lints), exempt test code in `clippy.toml` instead of sprinkling `#[allow]`:
 
 ```toml
 allow-unwrap-in-tests = true
@@ -157,16 +138,13 @@ allow-panic-in-tests = true
 allow-indexing-slicing-in-tests = true
 ```
 
-`allow-panic-in-tests` needs clippy 1.80 and `allow-indexing-slicing-in-tests` 1.85. Helper functions that are not `#[test]` functions or inside `#[cfg(test)]` code, such as helpers in `tests/`, are still linted. Return `Result` or use `expect` there.
+`allow-panic-in-tests` needs clippy 1.80+ and `allow-indexing-slicing-in-tests` 1.85+. Helpers outside `#[cfg(test)]` code, such as those in `tests/`, are still linted: return `Result` or use `expect` there.
 
 ## Avoid
 
-- `#[should_panic]` with no `expected`, and `#[ignore]` with no reason: both are bare attributes that hide intent.
-- `assert!(a == b)` on values that are `Debug`: `assert_eq!` prints both sides.
-- Many unrelated checks in one test. Several assertions are fine when they establish one behavior.
-- `println!` as a check. Output is captured and the test still passes.
+- Bare `#[should_panic]` and `#[ignore]`, `assert!(a == b)` on `Debug` values, and `println!` as a check (output is captured and the test passes).
 
 ## Verify
 
-- `cargo clippy --all-targets -- -W clippy::should_panic_without_expect -W clippy::ignore_without_reason -W clippy::bool_assert_comparison -W clippy::assertions_on_result_states -W clippy::manual_assert`. `ignore_without_reason` needs clippy 1.88. Lints see test code only with `--all-targets` or `--tests`.
+- `cargo clippy --workspace --all-targets -- -W clippy::should_panic_without_expect -W clippy::ignore_without_reason -W clippy::assertions_on_result_states`. All three are opt-in (`should_panic_without_expect` and `ignore_without_reason` are pedantic, `assertions_on_result_states` is restriction); `bool_assert_comparison` is on by default. `ignore_without_reason` needs clippy 1.88+. Optional, also pedantic: `clippy::manual_assert` (`if c { panic!() }` becomes `assert!`).
 - Break the code under test on purpose once and read the failure output: it should name the input and both values.

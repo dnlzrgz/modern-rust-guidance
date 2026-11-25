@@ -30,18 +30,12 @@ pub fn describe(items: &[(&str, u32)]) -> String {
 }
 ```
 
-## Build from sequences with `join` and `collect`
+## Build from sequences with `join`, `collect`, and one buffer
+
+`fields.join(",")` and `iter.collect::<String>()` (`String` implements `FromIterator` for `char`, `&str`, and `String`) need no per-element temporary. Mapping each element through `format!` first creates one throwaway `String` per element. Write into one buffer instead:
 
 ```rust
 use std::fmt::Write as _;
-
-pub fn csv(fields: &[&str]) -> String {
-    fields.join(",") // no per-field temporary String
-}
-
-pub fn initials(words: &[&str]) -> String {
-    words.iter().filter_map(|w| w.chars().next()).collect() // String: FromIterator<char>
-}
 
 pub fn hex(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(bytes.len() * 2);
@@ -49,25 +43,6 @@ pub fn hex(bytes: &[u8]) -> String {
         write!(s, "{b:02x}").expect("Display impl failed"); // not map(format!).collect::<String>()
     }
     s
-}
-```
-
-`String` implements `FromIterator` for `char`, `&str`, and `String` items. Mapping each element through `format!` first creates one throwaway `String` per element.
-
-## Reuse the buffer in a loop
-
-```rust
-use std::fmt::Write as _;
-
-pub fn total_len(ids: &[u32]) -> usize {
-    let mut line = String::new();
-    let mut total = 0;
-    for id in ids {
-        line.clear(); // keeps the capacity
-        write!(line, "id-{id:08}").expect("Display impl failed");
-        total += line.len(); // stand-in for handing &line to a writer
-    }
-    total
 }
 ```
 
@@ -99,7 +74,7 @@ pub fn start(id: u32, at: &Point) {
 ```
 
 > [!TIP]
-> To return a lazily formatted value without a named type, `std::fmt::from_fn` (1.93) wraps a closure as `Display`. Before 1.93, write a small struct with a `Display` impl.
+> To return a lazily formatted value without a named type, `std::fmt::from_fn` (needs 1.93) wraps a closure as `Display`. On older toolchains, write a small struct with a `Display` impl.
 
 ## Avoid
 
@@ -128,9 +103,8 @@ pub fn show(x: u32) {
 
 - `format!("{}", s)` with `s: &str` or `String`: use `s.to_string()`, or avoid the copy altogether.
 - A `format!` just to pass `&str` to a function that only displays or writes it: use `format_args!` or `write!`.
-- `+` chains and `format!` for joining paths: use `Path::join`.
 
 ## Verify
 
 - `cargo clippy -- -W clippy::format_push_string -W clippy::format_collect` (both pedantic). `useless_format`, `format_in_format_args`, and `to_string_in_format_args` are on by default.
-- A `format!` outside a hot path is fine. Only change loops and hot functions shown by a profile (`measure-before-optimizing`).
+- A `format!` outside a hot path is fine. Only change loops and hot functions shown by a profile (see `measure-before-optimizing`).

@@ -15,7 +15,7 @@ Keep the happy path at the left margin: bail out of the failure case first, then
 
 ## Use `?` when the caller can take the failure as is
 
-`?` works on `Option` in functions returning `Option`, and on `Result` with an automatic `From` conversion of the error. Do not hand-write `match … { Err(e) => return Err(e) }` or `if x.is_none() { return None; }`.
+`?` works on `Option` and on `Result` (with a `From` conversion of the error). Never hand-write `match … { Err(e) => return Err(e) }` or `if x.is_none() { return None; }`.
 
 ```rust
 pub fn host_and_port(url: &str) -> Option<(&str, u16)> {
@@ -49,7 +49,7 @@ Notes: the initializer cannot end in `}` (an `if`/`match` directly before `else`
 
 ## Chain conditions with let chains (1.88, edition 2024 only)
 
-In edition 2024, `if` and `while` accept `&&` chains that mix `let` patterns and booleans. This replaces nested `if let { if cond { … } }`. It does not compile in edition 2021 or earlier. `||` is not allowed, and `let` must be at the top level of the chain.
+In edition 2024, `if` and `while` accept `&&` chains that mix `let` patterns and booleans. This replaces nested `if let { if cond { … } }`. It does not compile in edition 2021 or earlier. `||` is not allowed, and `let` must be at the top level of the chain. `matches!(v, Pat if guard)` is a plain `bool`, so it also composes inside a chain.
 
 ```rust
 use std::collections::HashMap;
@@ -66,15 +66,21 @@ pub fn lookup_limit(cfg: &HashMap<String, String>, key: &str) -> Option<u32> {
 }
 ```
 
-Edition 2024 also drops `if let` scrutinee temporaries (guards, borrows) *before* the `else` branch, which removes the classic re-lock deadlock. See `edition-2024-changes`.
-
-## Use `matches!` for a boolean pattern test
-
-`matches!(value, Pattern if guard)` is a `bool`, so it composes inside `&&` and filters. Reach for `if let` when you need the bindings.
+Edition 2024 drops `if let` scrutinee temporaries (guards, borrows) *before* the `else` branch, which removes the classic re-lock deadlock (see `edition-2024-changes`). It does **not** change `match` scrutinees or `while let`: a guard created in a `match` scrutinee still lives through every arm.
 
 ```rust
-pub fn is_retryable(status: Option<u16>) -> bool {
-    matches!(status, Some(429 | 500..=599))
+use std::sync::Mutex;
+
+pub fn pop_or_refill(m: &Mutex<Vec<u32>>) -> u32 {
+    // `match m.lock().unwrap().pop() { None => m.lock()… }` would deadlock: the guard lives through the arms.
+    let item = m.lock().unwrap().pop(); // guard dropped at the semicolon
+    match item {
+        Some(x) => x,
+        None => {
+            m.lock().unwrap().push(1);
+            1
+        }
+    }
 }
 ```
 
@@ -115,11 +121,10 @@ Also avoid a `match` whose only arm re-matches the inner value (`collapsible_mat
 ## Older MSRV
 
 - **Let chains need 1.88 and edition 2024.** On older toolchains or edition 2021, nest the `if let`, or use `let … else` with `continue`/`return` on each failed step.
-- **`let … else` needs 1.65**, so it is available everywhere this skill applies.
 - `collapsible_if` only suggests let chains when the MSRV is 1.88 or newer and the crate is edition 2024.
 
 ## Verify
 
-- `cargo clippy -- -W clippy::manual_let_else -W clippy::question_mark -W clippy::collapsible_if -W clippy::collapsible_match`. `manual_let_else` is pedantic, so it is off by default.
+- `cargo clippy` flags `question_mark`, `collapsible_if`, and `collapsible_match` by default. `manual_let_else` is pedantic: run it with `-W clippy::manual_let_else`.
 - Every `else` of a `let … else` should `return`, `continue`, or `break` with intent. A bare `else { panic!() }` on external input deserves a second look.
 - When you convert `if let … else` to a chain or `match`, re-check any lock guard or `RefCell` borrow in the scrutinee (edition 2024 temporary scope).

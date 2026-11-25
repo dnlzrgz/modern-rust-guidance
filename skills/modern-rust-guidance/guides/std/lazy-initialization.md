@@ -6,6 +6,7 @@ clippy-lints: [non_std_lazy_statics, missing_const_for_thread_local]
 sources:
   - "std docs: std::sync::LazyLock, std::sync::OnceLock, std::cell::LazyCell, std::thread_local (MIT/Apache-2.0)"
   - "Rust Edition Guide, 2024: Disallow references to static mut (MIT/Apache-2.0)"
+  - "Rust release notes 1.80, 1.94 (MIT/Apache-2.0)"
   - "Clippy lint docs: non_std_lazy_statics, missing_const_for_thread_local (MIT/Apache-2.0)"
 ---
 
@@ -15,7 +16,7 @@ Global or lazily computed state needs no macro, no crate, and no `unsafe`. Pick 
 
 ## Use a plain `static` when the constructor is `const`
 
-`Mutex::new`, `RwLock::new`, `Condvar::new` (all `const` since 1.63), atomics, `Vec::new`, `String::new`, `BTreeMap::new` (1.66), and `VecDeque::new` (1.68) need no lazy wrapper. `HashMap::new` and `HashSet::new` are **not** `const` (`with_hasher` is, since 1.85), so a `Mutex<HashMap<..>>` static needs `LazyLock`.
+`Mutex::new`, `RwLock::new`, `Condvar::new` (all `const` since 1.63), atomics, `Vec::new`, `String::new`, `BTreeMap::new` (1.66), and `VecDeque::new` (1.68) need no lazy wrapper. `HashMap::new` and `HashSet::new` are **not** `const` (`with_hasher` is, but needs 1.85), so a `Mutex<HashMap<..>>` static needs `LazyLock`.
 
 ```rust
 use std::collections::HashMap;
@@ -34,7 +35,7 @@ pub fn register(name: &str, id: u32) {
 }
 ```
 
-`LazyLock::force(&X)` runs the initializer eagerly, e.g. at startup, so a failure surfaces early. If the closure panics, the `LazyLock` is poisoned for good: every later access panics. Keep initializers infallible, or use `OnceLock` when you must handle errors.
+`LazyLock::force(&X)` runs the initializer eagerly, e.g. at startup, so a failure surfaces early. `LazyLock::get(&X)` (needs 1.94) returns `Option<&T>` without running the initializer. If the closure panics, the `LazyLock` is poisoned for good: every later access panics. Keep initializers infallible, or use `OnceLock` when you must handle errors.
 
 ## Use `OnceLock` when the input arrives at runtime
 
@@ -126,6 +127,6 @@ A `Mutex<Option<T>>` plus `.unwrap()` as a hand-rolled lazy global.
 
 ## Verify
 
-- `cargo clippy -- -W clippy::non_std_lazy_statics -W clippy::missing_const_for_thread_local` (the first only matters while `lazy_static`/`once_cell` are still dependencies).
-- `rg "static mut|lazy_static|once_cell"` should come back empty after the change.
+- `cargo clippy` flags `missing_const_for_thread_local` by default. `non_std_lazy_statics` is pedantic and only matters while `lazy_static`/`once_cell` are still dependencies: run it with `-W clippy::non_std_lazy_statics`.
+- `rg "static mut|lazy_static"` should come back empty after the change. On MSRV 1.80 or newer, `rg once_cell` should too, unless you use `once_cell::race` or `OnceBox`.
 - In review, check that no `LazyLock` initializer can panic or call back into its own static.

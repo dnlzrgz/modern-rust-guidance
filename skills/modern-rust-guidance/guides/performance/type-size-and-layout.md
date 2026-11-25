@@ -12,7 +12,7 @@ sources:
 
 # Type Size and Layout
 
-A value is as large as its largest part, and every move or return copies all of it. Shrinking a type that is created in bulk or moved often saves memory and copying. This only matters for hot or numerous types, so find them first (`measure-before-optimizing`). To make immutable data compact, see also `allocation-reuse`.
+A value is as large as its largest part, and every move or return copies all of it. Shrinking a type that is created in bulk or moved often saves memory and copying. This only matters for hot or numerous types, so find them first (see `measure-before-optimizing`). To make immutable data compact, see `allocation-reuse`.
 
 ## Measure sizes, then guard them
 
@@ -33,13 +33,6 @@ pub struct Hot {
 
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(size_of::<Hot>() <= 40, "Hot grew: check the layout before raising this");
-
-#[test]
-fn compact_representations() {
-    assert_eq!(size_of::<Option<NonZeroU32>>(), size_of::<u32>());
-    assert_eq!(size_of::<Option<Box<u64>>>(), size_of::<Box<u64>>());
-    assert!(size_of::<Box<[u32]>>() < size_of::<Vec<u32>>()); // ptr+len vs ptr+cap+len
-}
 ```
 
 ## Box rare, large enum variants
@@ -82,7 +75,7 @@ Store indices and IDs as `u32` (or smaller) and widen with `usize::try_from` or 
 
 ## Keep big values off the stack
 
-Pass large `Copy` types by reference, and keep large arrays out of locals. `large_types_passed_by_value` flags by-value arguments of 256 bytes or more (`pass-by-value-size-limit`) and skips exported functions. `[0u8; 1 << 20]` and `Box::new([0u8; N])` may build the array on the stack before moving it. Allocate directly instead:
+Pass large `Copy` types by reference, and keep large arrays out of locals. `large_types_passed_by_value` flags by-value arguments of 256 bytes or more (`pass-by-value-size-limit`) and skips exported functions. `large_stack_arrays` flags arrays over 16384 bytes by default (`array-size-threshold`). `[0u8; 1 << 20]` and `Box::new([0u8; N])` may build the array on the stack before moving it. Allocate directly instead:
 
 ```rust
 pub fn zeroed_buffer() -> Box<[u8]> {
@@ -137,8 +130,6 @@ pub async fn run() -> u8 {
     read_big().await
 }
 ```
-
-- Boxing everything "to keep types small". Box only the rare, large part, and measure.
 
 ## Older MSRV
 

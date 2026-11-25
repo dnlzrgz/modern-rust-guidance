@@ -2,12 +2,12 @@
 name: error-values
 description: Define, convert, and report errors with std only: custom error types, From for the ? operator, io::Error::other, Box<dyn Error> in applications, and when to panic.
 rust-version: "1.74"
-clippy-lints: [io_other_error, map_err_ignore]
+clippy-lints: [io_other_error, result_unit_err]
 sources:
   - "std docs: std::error::Error, std::io::Error, std::process::Termination (MIT/Apache-2.0)"
   - "Rust API Guidelines, C-GOOD-ERR (MIT/Apache-2.0)"
   - "Microsoft Pragmatic Rust Guidelines: M-ERRORS-CANONICAL-STRUCTS, M-PANIC-ON-BUG, M-APP-ERROR (MIT)"
-  - "Clippy lint docs: io_other_error, map_err_ignore, unwrap_used (MIT/Apache-2.0)"
+  - "Clippy lint docs: io_other_error, result_unit_err, map_err_ignore, unwrap_used (MIT/Apache-2.0)"
 ---
 
 # Error Values
@@ -31,7 +31,7 @@ pub enum ConfigError {
 }
 
 impl fmt::Display for ConfigError {
-    // Lowercase, no trailing period. Do not print the source here (see below).
+    // Lowercase, no trailing period; do not print the source here.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io(_) => f.write_str("could not read config"),
@@ -60,16 +60,16 @@ impl From<io::Error> for ConfigError {
 pub fn load_port(path: &str) -> Result<u16, ConfigError> {
     let text = std::fs::read_to_string(path)?; // io::Error -> ConfigError via From
     let raw = text.lines().next().ok_or(ConfigError::Missing("port"))?;
-    raw.trim().parse().map_err(|source| ConfigError::Parse { key: "port", source }) // keep the cause, never `|_|`
+    raw.trim().parse().map_err(|source| ConfigError::Parse { key: "port", source }) // keep the cause: `|_|` throws it away
 }
 ```
 
 Rules that models skip:
 
 - An error is either reported through `source()` **or** included in its own `Display`, not both. Otherwise a reporter that walks the chain prints every cause twice.
-- Derive `Debug`, implement `Display` and `Error`, and keep the type `Send + Sync + 'static` so it fits `Box<dyn Error + Send + Sync>`.
+- Derive `Debug`, implement `Display` and `Error`, and keep the type `Send + Sync + 'static` to fit `Box<dyn Error + Send + Sync>`.
 - Do not override the deprecated `Error::description` or `cause`, and do not expose `Box<dyn Error>` from a library's public API: callers cannot match on it.
-- `core::error::Error` (1.81) is the same trait as `std::error::Error`; it matters for `no_std` crates.
+- `map_err(|_| …)` is fine when the source error carries no information (a bare `ParseBoolError`-style marker); drop the source only then.
 
 ## Report errors in applications
 
@@ -83,9 +83,7 @@ type BoxError = Box<dyn Error + Send + Sync>;
 
 fn run() -> Result<(), BoxError> {
     let port: u16 = "80".parse()?; // any error converts via `?`
-    if port == 0 {
-        return Err("port must be non-zero".into()); // &str converts too
-    }
+    if port == 0 { return Err("port must be non-zero".into()); } // so does &str
     Ok(())
 }
 
@@ -94,7 +92,6 @@ pub fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("error: {e}");
-            // Print each cause on its own line.
             for cause in std::iter::successors(e.source(), |&c| c.source()) {
                 eprintln!("  caused by: {cause}");
             }
@@ -112,9 +109,7 @@ For an `io::Error` that does not come from the OS, `io::Error::other(e)` replace
 use std::io;
 
 pub fn check(len: usize) -> io::Result<()> {
-    if len > 1024 {
-        return Err(io::Error::other(format!("frame of {len} bytes is too large")));
-    }
+    if len > 1024 { return Err(io::Error::other(format!("frame of {len} bytes is too large"))); }
     Ok(())
 }
 ```
@@ -126,7 +121,7 @@ pub fn check(len: usize) -> io::Result<()> {
 ## Avoid
 
 ```rust,legacy
-// lint: io_other_error, map_err_ignore
+// lint: io_other_error, result_unit_err
 use std::io;
 
 pub fn a() -> io::Error {
@@ -136,17 +131,20 @@ pub fn a() -> io::Error {
 pub fn b(s: &str) -> Result<u8, String> {
     s.parse::<u8>().map_err(|_| String::from("bad number")) // drops the ParseIntError
 }
+
+pub fn c(s: &str) -> Result<u8, ()> {
+    s.parse::<u8>().map_err(|_| ()) // public `Result<_, ()>`: no message, no source
+}
 ```
 
-Also avoid `Result<T, String>` and `Result<T, ()>` in public APIs (no `source()`, nothing to match on), and `.ok()` or `let _ =` on a `Result` you should handle.
+Also avoid `Result<T, String>` in public APIs (no `source()`, nothing to match on; `result_unit_err` flags the `()` case), and `.ok()` or `let _ =` on a `Result` you should handle.
 
 ## Older MSRV
 
 - **Below 1.74:** use `io::Error::new(io::ErrorKind::Other, e)`. `io_other_error` only fires when the MSRV is 1.74 or newer.
-- **Below 1.81:** `Error` exists only as `std::error::Error`, so `no_std` crates cannot implement it.
 
 ## Verify
 
-- `cargo clippy -- -W clippy::io_other_error -W clippy::map_err_ignore`. `map_err_ignore` is in the `restriction` group.
+- `cargo clippy` flags `io_other_error` and `result_unit_err` by default. For a hand-run audit, `-W clippy::map_err_ignore` (restriction) lists every `map_err(|_| …)`; judge each one, since some are legitimate.
 - Opt in per crate with `#![warn(clippy::unwrap_used, clippy::expect_used)]` (also `restriction`) to find panics on fallible paths. Set `allow-unwrap-in-tests = true` and `allow-expect-in-tests = true` in `clippy.toml`.
 - Add a test that walks `source()` from a top-level error and asserts the chain, and one that checks `Display` text has no trailing punctuation.
