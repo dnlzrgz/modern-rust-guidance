@@ -66,7 +66,7 @@ fn command_help(command: &str) -> Option<&'static str> {
             "Usage: mrg search <query…> [--limit N] [--json] [--guides-dir D]\n\nBM25 search over guide ids, descriptions, headings, lints and bodies. Default limit 8.\nScores are relative to the best hit (1.00); hits below 0.35 are dropped.\n"
         }
         "retrieve" => {
-            "Usage: mrg retrieve <id>[,<id>…] [--msrv X.Y] [--guides-dir D]\n\nPrints each guide with an MSRV banner (MSRV from the current project unless --msrv is given).\nThe `## Older MSRV` section is dropped when the MSRV is high enough. Unknown id: exit 2.\n"
+            "Usage: mrg retrieve <id>[,<id>…] [--msrv X.Y | --manifest-path P] [--guides-dir D]\n\nPrints each guide with an MSRV banner (MSRV from the current project, from --manifest-path's project, or --msrv).\nThe `## Older MSRV` section is dropped when the MSRV is high enough. Unknown id: exit 2.\n"
         }
         "msrv" => {
             "Usage: mrg msrv [--manifest-path P]\n\nPrints the MSRV from Cargo.toml (`rust-version`, workspace inheritance) or clippy.toml.\n"
@@ -102,7 +102,7 @@ pub fn run(args: &[String]) -> Output {
         },
         "list" => list(&Parsed::new(rest, &["json"], &["category", "guides-dir"])?),
         "search" => search_cmd(&Parsed::new(rest, &["json"], &["limit", "guides-dir"])?),
-        "retrieve" => retrieve_cmd(&Parsed::new(rest, &[], &["msrv", "guides-dir"])?),
+        "retrieve" => retrieve_cmd(&Parsed::new(rest, &[], &["msrv", "manifest-path", "guides-dir"])?),
         "msrv" => msrv_cmd(&Parsed::new(rest, &[], &["manifest-path"])?),
         "scan" => scan_cmd(&Parsed::new(
             rest,
@@ -253,17 +253,18 @@ fn retrieve_cmd(parsed: &Parsed) -> Output {
         .filter(|id| !id.is_empty())
         .collect();
     if ids.is_empty() {
-        return Err(usage("usage: mrg retrieve <id>[,<id>…] [--msrv X.Y]"));
+        return Err(usage("usage: mrg retrieve <id>[,<id>…] [--msrv X.Y | --manifest-path P]"));
     }
     let (guides, _) = load_guides(parsed, false)?;
     let project_msrv = match parsed.value("msrv") {
         Some(text) => {
             Some(Version::parse(text).ok_or_else(|| usage(format!("invalid --msrv `{text}`")))?)
         }
-        None => env::current_dir()
-            .ok()
-            .and_then(|cwd| msrv::detect(&cwd))
-            .map(|m| m.version),
+        None => match parsed.value("manifest-path") {
+            Some(path) => msrv::detect(&manifest_dir(path)),
+            None => env::current_dir().ok().and_then(|cwd| msrv::detect(&cwd)),
+        }
+        .map(|m| m.version),
     };
     let mut selected: Vec<&Guide> = Vec::new();
     for id in ids {
@@ -284,23 +285,25 @@ fn retrieve_cmd(parsed: &Parsed) -> Output {
     Ok(retrieve::render_many(&selected, project_msrv))
 }
 
-fn msrv_cmd(parsed: &Parsed) -> Output {
-    let start = match parsed.value("manifest-path") {
-        Some(path) => {
-            let path = Path::new(path);
-            let dir = if path.is_dir() {
-                path
-            } else {
-                path.parent().unwrap_or(Path::new(""))
-            };
-            if dir.as_os_str().is_empty() {
-                PathBuf::from(".")
-            } else {
-                dir.to_path_buf()
-            }
-        }
-        None => PathBuf::from("."),
+/// The directory to start MSRV detection from, for a `--manifest-path` value.
+fn manifest_dir(path: &str) -> PathBuf {
+    let path = Path::new(path);
+    let dir = if path.is_dir() {
+        path
+    } else {
+        path.parent().unwrap_or(Path::new(""))
     };
+    if dir.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        dir.to_path_buf()
+    }
+}
+
+fn msrv_cmd(parsed: &Parsed) -> Output {
+    let start = parsed
+        .value("manifest-path")
+        .map_or_else(|| PathBuf::from("."), manifest_dir);
     let start =
         fs::canonicalize(&start).map_err(|e| format!("cannot read {}: {e}", start.display()))?;
     let declared = msrv::declared(&start);

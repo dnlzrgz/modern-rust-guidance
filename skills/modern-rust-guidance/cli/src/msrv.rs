@@ -105,7 +105,9 @@ pub fn declared(start: &Path) -> Declared {
                     cargo = found(v, &path, "[package] rust-version");
                     break;
                 }
-                if toml.bool("package", "rust-version.workspace") != Some(true) {
+                let inherits = toml.bool("package", "rust-version.workspace") == Some(true)
+                    || toml.bool("package", "rust-version") == Some(true);
+                if !inherits {
                     break;
                 }
             }
@@ -177,6 +179,23 @@ mod tests {
         let msrv = detect(&dir).unwrap();
         assert_eq!(msrv.version, v("1.74"));
         assert!(msrv.source.contains("[package] rust-version"));
+    }
+
+    #[test]
+    fn inherits_workspace_rust_version_inline_table() {
+        let dir = tempdir("ws-inline");
+        fs::write(
+            dir.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"m\"]\n[workspace.package]\nrust-version = \"1.85\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(dir.join("m")).unwrap();
+        fs::write(
+            dir.join("m/Cargo.toml"),
+            "[package]\nname = \"m\"\nrust-version = { workspace = true }\n",
+        )
+        .unwrap();
+        assert_eq!(detect(&dir.join("m")).unwrap().version, v("1.85"));
     }
 
     #[test]

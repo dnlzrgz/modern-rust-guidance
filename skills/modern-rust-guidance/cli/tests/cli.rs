@@ -118,6 +118,25 @@ fn retrieve_applies_msrv_banner() {
 }
 
 #[test]
+fn retrieve_reads_msrv_from_manifest_path() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("retrieve-manifest-path");
+    std::fs::create_dir_all(&dir).expect("create dir");
+    std::fs::write(
+        dir.join("Cargo.toml"),
+        "[package]\nname = \"x\"\nversion = \"0.0.0\"\nrust-version = \"1.74\"\n",
+    )
+    .expect("write manifest");
+    let manifest = dir.join("Cargo.toml");
+    let out = stdout(&mrg(&[
+        "retrieve",
+        "early-return",
+        "--manifest-path",
+        manifest.to_str().expect("utf-8 path"),
+    ]));
+    assert!(out.contains("[!IMPORTANT]") && out.contains("1.74"));
+}
+
+#[test]
 fn retrieve_many_prints_a_shared_banner_once() {
     let ok = stdout(&mrg(&[
         "retrieve",
