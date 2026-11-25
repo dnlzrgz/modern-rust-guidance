@@ -69,6 +69,9 @@ impl Runner {
         lints: &[String],
     ) -> Result<Outcome, String> {
         let mut command = Command::new(program);
+        // Under `cargo run`, Cargo sets this to the CLI's own MSRV, and clippy-driver
+        // would treat it as the snippets' MSRV and stay silent on newer lints.
+        command.env_remove("CARGO_PKG_RUST_VERSION");
         command
             .args([
                 "--edition",
