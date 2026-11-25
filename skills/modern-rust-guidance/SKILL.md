@@ -1,6 +1,7 @@
 ---
 name: modern-rust-guidance
 description: Current Rust standard-library idioms, performance practice, and testing practice, checked against the project's MSRV. Use when writing, reviewing, refactoring, optimizing, or testing Rust code, and when modernizing older Rust. Covers std APIs stabilized after ~1.70 that models often miss, edition 2024 changes, allocation/copy/IO performance, release profiles, and std test-harness practice. Not for choosing third-party crates.
+license: MIT
 ---
 
 # Modern Rust Guidance
