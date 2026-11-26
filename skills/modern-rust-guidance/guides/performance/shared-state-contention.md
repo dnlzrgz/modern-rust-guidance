@@ -14,7 +14,7 @@ A lock is slow only when threads wait for it. Threads that share one `Arc<Mutex<
 
 ## Hold a lock only for the access
 
-Never hold a guard across slow work: I/O, sleeping, a big computation, or a call into code you don't control. Never hold a `std::sync` guard across `.await`: it blocks the executor thread and can deadlock. Take what you need, let the guard drop (end of scope, a `{ .. }` block, or `drop(guard)`), then work.
+Never hold a guard across slow work: I/O, sleeping, a big computation, or a call into code you don't control. Take what you need, let the guard drop, then work. In sync code, end the guard's life with the end of the scope, a `{ .. }` block, or `drop(guard)`. Never hold a `std::sync` guard across `.await`: it blocks the executor thread and can deadlock. There, only a `{ .. }` block works: after `drop(guard)` the compiler still treats the guard as live across the `.await`, so the future is not `Send` and `await_holding_lock` still fires.
 
 ```rust
 use std::sync::Mutex;
@@ -42,6 +42,20 @@ impl Cache {
         entries.push((key, value.clone()));
         value
     }
+}
+```
+
+```rust
+use std::sync::Mutex;
+
+pub async fn refresh(cache: &Mutex<Vec<u32>>) -> usize {
+    let len = {
+        let mut guard = cache.lock().expect("cache lock poisoned");
+        guard.clear();
+        guard.len()
+    }; // guard is out of scope before the await, so the future stays `Send`
+    std::future::ready(()).await;
+    len
 }
 ```
 
