@@ -49,6 +49,8 @@ On stable Rust 1.100 these do not compile: `OnceLock::get_or_try_init`, signed `
 - `array_chunks` → `<[T]>::as_chunks` (1.88); `map_windows` → `<[T]>::array_windows` (1.94).
 - `intersperse`, `try_collect`, `collect_into`, and the rest → a plain loop or `fold`.
 
+Async has its own list: `std::future::join!`, `AsyncIterator` and `async gen` blocks, async `Drop`, and return type notation. The `ecosystem` hub lists the stable replacements.
+
 ## Guides
 
 - `lazy-initialization`: global state, a lazily computed value, a runtime-initialized singleton, `thread_local!`, or replacing `lazy_static`, `once_cell`, or `static mut`.

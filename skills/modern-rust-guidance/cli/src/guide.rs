@@ -12,7 +12,7 @@ mod embedded {
 }
 
 /// The known categories, in display order.
-pub const CATEGORIES: [&str; 3] = ["std", "performance", "testing"];
+pub const CATEGORIES: [&str; 4] = ["std", "performance", "testing", "ecosystem"];
 
 /// A raw guide file: path relative to the guides directory (`/`-separated) plus contents.
 #[derive(Debug, Clone)]

@@ -11,13 +11,14 @@ Models learn from years of old Rust. So they still write `lazy_static!`, deep `m
 
 ## What's inside
 
-- **29 guides**: 26 topic guides plus 3 overview guides (one per category).
+- **33 guides**: 29 topic guides plus 4 overview guides (one per category).
 
   | Category | Examples |
   | --- | --- |
   | `std` | `let … else`, `LazyLock`, `Option`/`Result` combinators, integer math, errors, edition 2024, lint setup |
   | `performance` | measuring first, allocations, needless copies, buffered I/O, release profile, lock contention |
   | `testing` | clear assertions, test isolation, testable design, doc tests, Miri |
+  | `ecosystem` | `async fn` in traits, async closures, `pin!` and polling by hand |
 
   Each guide states the minimum Rust version it needs and the clippy lints that catch the old pattern. Every code snippet in the guides compiles.
 - **`mrg`** (optional): a small command-line tool for searching and reading the guides. It has no dependencies and makes no network calls. You can skip it, because the agent can read the guides directly.

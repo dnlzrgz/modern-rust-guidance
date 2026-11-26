@@ -44,6 +44,7 @@ fn list_shows_hubs_first_and_filters_by_category() {
             "std",
             "performance",
             "testing",
+            "ecosystem",
             "early-return",
             "allocation-reuse",
             "test-assertions"
@@ -247,14 +248,14 @@ fn index_prints_catalog() {
 fn check_passes_on_fixtures() {
     let out = mrg(&["check"]);
     assert!(out.status.success(), "{}", stderr(&out));
-    assert!(stdout(&out).starts_with("ok: 6 guides passed (structure)"));
+    assert!(stdout(&out).starts_with("ok: 7 guides passed (structure)"));
 }
 
 #[test]
 fn check_reports_structure_errors() {
     let copy = Path::new(env!("CARGO_TARGET_TMPDIR")).join("broken-guides");
     let _ = std::fs::remove_dir_all(&copy);
-    for category in ["std", "performance", "testing"] {
+    for category in ["std", "performance", "testing", "ecosystem"] {
         std::fs::create_dir_all(copy.join(category)).unwrap();
         for entry in std::fs::read_dir(guides().join(category)).unwrap() {
             let entry = entry.unwrap();
@@ -296,7 +297,7 @@ fn check_detects_wrong_fences() {
     }
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("bad-blocks");
     let _ = std::fs::remove_dir_all(&dir);
-    for category in ["std", "performance", "testing"] {
+    for category in ["std", "performance", "testing", "ecosystem"] {
         std::fs::create_dir_all(dir.join(category)).unwrap();
         for entry in std::fs::read_dir(guides().join(category)).unwrap() {
             let entry = entry.unwrap();
@@ -460,7 +461,7 @@ fn embedded_guides_work_without_guides_dir() {
 fn copy_fixtures(name: &str) -> PathBuf {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
     let _ = std::fs::remove_dir_all(&dir);
-    for category in ["std", "performance", "testing"] {
+    for category in ["std", "performance", "testing", "ecosystem"] {
         std::fs::create_dir_all(dir.join(category)).unwrap();
         for entry in std::fs::read_dir(guides().join(category)).unwrap() {
             let entry = entry.unwrap();

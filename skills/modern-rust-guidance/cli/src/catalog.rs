@@ -136,6 +136,8 @@ mod tests {
             "std/alpha.md",
             "std/std.md",
             "performance/performance.md",
+            "ecosystem/gamma.md",
+            "ecosystem/ecosystem.md",
         ]
         .iter()
         .map(|p| Guide::parse(&source(p, "1.80", "# T\n")).unwrap())
@@ -148,11 +150,27 @@ mod tests {
         let ids = |v: Vec<&Guide>| v.iter().map(|g| g.id().to_owned()).collect::<Vec<_>>();
         assert_eq!(
             ids(hubs_first(&guides)),
-            ["std", "performance", "testing", "alpha", "zeta"]
+            [
+                "std",
+                "performance",
+                "testing",
+                "ecosystem",
+                "alpha",
+                "zeta",
+                "gamma"
+            ]
         );
         assert_eq!(
             ids(by_category(&guides)),
-            ["std", "alpha", "zeta", "performance", "testing"]
+            [
+                "std",
+                "alpha",
+                "zeta",
+                "performance",
+                "testing",
+                "ecosystem",
+                "gamma"
+            ]
         );
     }
 
@@ -162,7 +180,15 @@ mod tests {
         assert_eq!(table.len(), 1);
         assert_eq!(
             table["manual_let_else"],
-            ["alpha", "performance", "std", "testing", "zeta"]
+            [
+                "alpha",
+                "ecosystem",
+                "gamma",
+                "performance",
+                "std",
+                "testing",
+                "zeta"
+            ]
         );
     }
 
@@ -173,6 +199,7 @@ mod tests {
         let std_hub = text.find("| `std` (hub) | 1.80 |").unwrap();
         assert!(std_hub < text.find("| `alpha` |").unwrap());
         assert!(text.find("## std").unwrap() < text.find("## performance").unwrap());
+        assert!(text.find("## testing").unwrap() < text.find("## ecosystem").unwrap());
         assert!(text.contains("| `manual_let_else` |") || text.contains("`manual_let_else` |"));
     }
 

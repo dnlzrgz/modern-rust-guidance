@@ -209,6 +209,7 @@ mod tests {
             source("std/std.md", "1.70", HUB_BODY),
             source("performance/performance.md", "1.70", "# P\n"),
             source("testing/testing.md", "1.70", "# T\n"),
+            source("ecosystem/ecosystem.md", "1.70", "# E\n"),
         ];
         all.extend(extra);
         all
