@@ -14,7 +14,9 @@ A lock is slow only when threads wait for it. Threads that share one `Arc<Mutex<
 
 ## Hold a lock only for the access
 
-Never hold a guard across slow work: I/O, sleeping, a big computation, or a call into code you don't control. Take what you need, let the guard drop, then work. In sync code, end the guard's life with the end of the scope, a `{ .. }` block, or `drop(guard)`. Never hold a `std::sync` guard across `.await`: it blocks the executor thread and can deadlock. There, only a `{ .. }` block works: after `drop(guard)` the compiler still treats the guard as live across the `.await`, so the future is not `Send` and `await_holding_lock` still fires.
+Never hold a guard across slow work: I/O, sleeping, a big computation, or a call into code you don't control. Take what you need, let the guard drop, then work. In sync code the end of the scope, a `{ .. }` block, or `drop(guard)` all do that.
+
+Never hold a `std::sync` guard across `.await`: it blocks the executor thread and can deadlock. There, only a `{ .. }` block works. After `drop(guard)` the compiler still counts the guard as live across the `.await`, so the future is not `Send` (a guard is `!Send`) and `await_holding_lock` still fires.
 
 ```rust
 use std::sync::Mutex;
@@ -53,9 +55,29 @@ pub async fn refresh(cache: &Mutex<Vec<u32>>) -> usize {
         let mut guard = cache.lock().expect("cache lock poisoned");
         guard.clear();
         guard.len()
-    }; // guard is out of scope before the await, so the future stays `Send`
+    }; // guard is out of scope before the await
     std::future::ready(()).await;
     len
+}
+
+pub fn spawnable(cache: &'static Mutex<Vec<u32>>) {
+    fn assert_send<T: Send>(_: T) {}
+    assert_send(refresh(cache)); // compiles: the future is `Send`
+}
+```
+
+```rust,compile_fail
+use std::sync::Mutex;
+
+pub fn spawnable(cache: &'static Mutex<Vec<u32>>) {
+    fn assert_send<T: Send>(_: T) {}
+    assert_send(async move {
+        let guard = cache.lock().expect("cache lock poisoned");
+        let len = guard.len();
+        drop(guard); // too late: the guard still counts as live below
+        std::future::ready(()).await;
+        let _ = len;
+    });
 }
 ```
 
@@ -161,4 +183,5 @@ pub async fn refresh(cache: &Mutex<Vec<u32>>) {
 ## Verify
 
 - `cargo clippy`: `await_holding_lock` is on by default. `mutex_atomic` is restriction, so enable it with `-W clippy::mutex_atomic`. `significant_drop_tightening` (nursery) flags guards that live longer than needed, but it is noisy, so run it by hand.
+- For async code, assert that a spawned future is `Send` at compile time (`fn assert_send<T: Send>(_: T) {}`, as in the snippet above) so a guard that lives across `.await` fails the build.
 - Run with 1 thread and with N threads, and check that both give the same result. If N is not faster, profile what holds the lock (see `measure-before-optimizing`).
